@@ -26,3 +26,4 @@ dist/
 .vscode/
 coverage.txt
 profile.out
+/go.sum
