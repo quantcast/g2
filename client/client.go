@@ -21,6 +21,7 @@ import (
 var (
 	DefaultTimeout time.Duration = time.Second
 	Null                         = byte('\x00')
+	NullBytes                    = []byte{Null}
 )
 
 // One client connect to one server.
@@ -28,43 +29,19 @@ var (
 type Client struct {
 	sync.Mutex
 
-	net, addr    string
-	respHandler  *responseHandlerMap
-	innerHandler *responseHandlerMap
-	in           chan *Response
-	conn         net.Conn
-	rw           *bufio.ReadWriter
+	net, addr string
+	handlers  sync.Map
+	expected  chan *Response
+	outbound  chan *request
+	conn      net.Conn
+	rw        *bufio.ReadWriter
 
-	ResponseTimeout time.Duration // response timeout for do()
+	responsePool *sync.Pool
+	requestPool  *sync.Pool
+
+	ResponseTimeout time.Duration
 
 	ErrorHandler ErrorHandler
-}
-
-type responseHandlerMap struct {
-	sync.RWMutex
-	holder map[string]ResponseHandler
-}
-
-func newResponseHandlerMap() *responseHandlerMap {
-	return &responseHandlerMap{holder: make(map[string]ResponseHandler, int(rt.QueueSize))}
-}
-
-func (r *responseHandlerMap) remove(key string) {
-	r.Lock()
-	delete(r.holder, key)
-	r.Unlock()
-}
-
-func (r *responseHandlerMap) get(key string) (ResponseHandler, bool) {
-	r.RLock()
-	rh, b := r.holder[key]
-	r.RUnlock()
-	return rh, b
-}
-func (r *responseHandlerMap) put(key string, rh ResponseHandler) {
-	r.Lock()
-	r.holder[key] = rh
-	r.Unlock()
 }
 
 // Return a client.
@@ -72,48 +49,67 @@ func New(network, addr string) (client *Client, err error) {
 	client = &Client{
 		net:             network,
 		addr:            addr,
-		respHandler:     newResponseHandlerMap(),
-		innerHandler:    newResponseHandlerMap(),
-		in:              make(chan *Response, rt.QueueSize),
+		outbound:        make(chan *request),
+		expected:        make(chan *Response),
 		ResponseTimeout: DefaultTimeout,
+		responsePool:    &sync.Pool{New: func() interface{} { return &Response{} }},
+		requestPool:     &sync.Pool{New: func() interface{} { return &request{} }},
 	}
+
 	client.conn, err = net.Dial(client.net, client.addr)
+
 	if err != nil {
 		return
 	}
+
 	client.rw = bufio.NewReadWriter(bufio.NewReader(client.conn),
 		bufio.NewWriter(client.conn))
+
 	go client.readLoop()
-	go client.processLoop()
+	go client.writeLoop()
+
 	return
 }
 
-func (client *Client) write(req *request) (err error) {
-	var n int
-	buf := req.Encode()
-	for i := 0; i < len(buf); i += n {
-		n, err = client.rw.Write(buf[i:])
-		if err != nil {
-			return
-		}
-	}
-	return client.rw.Flush()
-}
+func (client *Client) writeLoop() {
+	ibuf := make([]byte, 4)
+	length := uint32(0)
+	var i int
 
-func (client *Client) read(length int) (data []byte, err error) {
-	n := 0
-	buf := rt.NewBuffer(rt.BufferSize)
-	// read until data can be unpacked
-	for i := length; i > 0 || len(data) < rt.MinPacketLength; i -= n {
-		if n, err = client.rw.Read(buf); err != nil {
-			return
+	// Pipeline requests; but only write them one at a time. To allow multiple
+	// goroutines to all write as quickly as possible, uses a channel and the
+	// writeLoop lives in a separate goroutine.
+	for req := range client.outbound {
+		client.rw.Write([]byte(rt.ReqStr))
+
+		binary.BigEndian.PutUint32(ibuf, req.pt.Uint32())
+
+		client.rw.Write(ibuf)
+
+		length = 0
+
+		for _, chunk := range req.data {
+			length += uint32(len(chunk))
 		}
-		data = append(data, buf[0:n]...)
-		if n < rt.BufferSize {
-			break
+
+		// nil separators
+		length += uint32(len(req.data)) - 1
+
+		binary.BigEndian.PutUint32(ibuf, length)
+
+		client.rw.Write(ibuf)
+
+		client.rw.Write(req.data[0])
+
+		for i = 1; i < len(req.data); i++ {
+			client.rw.Write(NullBytes)
+			client.rw.Write(req.data[i])
 		}
+
+		client.requestPool.Put(req)
+
+		client.rw.Flush()
 	}
-	return
 }
 
 func decodeHeader(header []byte) (code []byte, pt uint32, length int) {
@@ -125,6 +121,10 @@ func decodeHeader(header []byte) (code []byte, pt uint32, length int) {
 }
 
 func (client *Client) reconnect(err error) error {
+	if client.conn != nil {
+		return nil
+	}
+
 	// TODO I doubt this error handling is right because it looks
 	// really complicated.
 	if opErr, ok := err.(*net.OpError); ok {
@@ -160,8 +160,6 @@ func (client *Client) reconnect(err error) error {
 }
 
 func (client *Client) readLoop() {
-	defer close(client.in)
-
 	header := make([]byte, rt.HeaderSize)
 
 	var err error
@@ -188,9 +186,10 @@ func (client *Client) readLoop() {
 			continue
 		}
 
-		resp = getResponse()
+		resp = client.responsePool.Get().(*Response)
 
 		resp.DataType, err = rt.NewPT(pt)
+
 		if err != nil {
 			client.err(err)
 			continue
@@ -218,28 +217,36 @@ func (client *Client) readLoop() {
 			resp.Data = contents
 		}
 
-		client.in <- resp
+		client.process(resp)
 	}
 }
 
-func (client *Client) processLoop() {
-	for resp := range client.in {
-		switch resp.DataType {
-		case rt.PT_Error:
-			log.Errorln("Received error", resp.Data)
-			client.err(getError(resp.Data))
-		case rt.PT_StatusRes:
-			resp = client.handleInner("s"+resp.Handle, resp)
-		case rt.PT_JobCreated:
-			resp = client.handleInner("c", resp)
-		case rt.PT_EchoRes:
-			resp = client.handleInner("e", resp)
-		case rt.PT_WorkData, rt.PT_WorkWarning, rt.PT_WorkStatus:
-			resp = client.handleResponse(resp.Handle, resp)
-		case rt.PT_WorkComplete, rt.PT_WorkFail, rt.PT_WorkException:
-			client.handleResponse(resp.Handle, resp)
-			client.respHandler.remove(resp.Handle)
+func (client *Client) process(resp *Response) {
+	switch resp.DataType {
+	case rt.PT_Error:
+		log.Errorln("Received error", resp.Data)
+
+		client.err(getError(resp.Data))
+
+		client.responsePool.Put(resp)
+
+	case rt.PT_StatusRes, rt.PT_JobCreated, rt.PT_EchoRes:
+		// NOTE Anything which reads from `expected` must return the
+		// response object to the pool.
+		client.expected <- resp
+	case rt.PT_WorkComplete, rt.PT_WorkFail, rt.PT_WorkException:
+		defer client.handlers.Delete(resp.Handle)
+		fallthrough
+	case rt.PT_WorkData, rt.PT_WorkWarning, rt.PT_WorkStatus:
+		// These alternate conditions should not happen so long as
+		// everyone is following the specification.
+		if handler, ok := client.handlers.Load(resp.Handle); ok {
+			if h, ok := handler.(ResponseHandler); ok {
+				h(resp)
+			}
 		}
+
+		client.responsePool.Put(resp)
 	}
 }
 
@@ -249,95 +256,62 @@ func (client *Client) err(e error) {
 	}
 }
 
-func (client *Client) handleResponse(key string, resp *Response) *Response {
-	if h, ok := client.respHandler.get(key); ok {
-		h(resp)
-		return nil
-	}
-	return resp
-}
-
-func (client *Client) handleInner(key string, resp *Response) *Response {
-	if h, ok := client.innerHandler.get(key); ok {
-		h(resp)
-		client.innerHandler.remove(key)
-		return nil
-	}
-	return resp
-}
-
 type handleOrError struct {
 	handle string
 	err    error
 }
 
-func (client *Client) do(funcname string, data []byte, flag rt.PT) (handle string, err error) {
-	if client.conn == nil {
-		return "", ErrLostConn
-	}
-	var result = make(chan handleOrError, 1)
-	client.Lock()
-	defer client.Unlock()
-	client.innerHandler.put("c", func(resp *Response) {
-		if resp.DataType == rt.PT_Error {
-			err = getError(resp.Data)
-			result <- handleOrError{"", err}
-			return
-		}
-		handle = resp.Handle
-		result <- handleOrError{handle, nil}
-	})
-	id := IdGen.Id()
-	req := getJob(id, []byte(funcname), data)
-	req.DataType = flag
-	if err = client.write(req); err != nil {
-		client.innerHandler.remove("c")
-		return
-	}
-	var timer = time.After(client.ResponseTimeout)
-	select {
-	case ret := <-result:
-		return ret.handle, ret.err
-	case <-timer:
-		client.innerHandler.remove("c")
-		return "", ErrLostConn
-	}
-	return
+func (client *Client) request() *request {
+	return client.requestPool.Get().(*request)
+}
+
+func (client *Client) submit(pt rt.PT, funcname string, arg []byte) string {
+	client.outbound <- client.request().submitJob(pt, funcname, IdGen.Id(), arg)
+
+	res := <-client.expected
+
+	defer client.responsePool.Put(res)
+
+	return res.Handle
 }
 
 // Call the function and get a response.
 // flag can be set to: JobLow, JobNormal and JobHigh
-func (client *Client) Do(funcname string, data []byte,
+func (client *Client) Do(funcname string, arg []byte,
 	flag byte, h ResponseHandler) (handle string, err error) {
-	var datatype rt.PT
+	var pt rt.PT
+
 	switch flag {
 	case rt.JobLow:
-		datatype = rt.PT_SubmitJobLow
+		pt = rt.PT_SubmitJobLow
 	case rt.JobHigh:
-		datatype = rt.PT_SubmitJobHigh
+		pt = rt.PT_SubmitJobHigh
 	default:
-		datatype = rt.PT_SubmitJob
+		pt = rt.PT_SubmitJob
 	}
-	handle, err = client.do(funcname, data, datatype)
-	if err == nil && h != nil {
-		client.respHandler.put(handle, h)
-	}
+
+	handle = client.submit(pt, funcname, arg)
+
+	client.handlers.Store(handle, h)
+
 	return
 }
 
 // Call the function in background, no response needed.
 // flag can be set to: JobLow, JobNormal and JobHigh
-func (client *Client) DoBg(funcname string, data []byte, flag byte) (handle string, err error) {
-	var datatype rt.PT
+func (client *Client) DoBg(funcname string, arg []byte, flag byte) (handle string, err error) {
+	var pt rt.PT
 	switch flag {
 	case rt.JobLow:
-		datatype = rt.PT_SubmitJobLowBG
+		pt = rt.PT_SubmitJobLowBG
 	case rt.JobHigh:
-		datatype = rt.PT_SubmitJobHighBG
+		pt = rt.PT_SubmitJobHighBG
 	default:
-		datatype = rt.PT_SubmitJobBG
+		pt = rt.PT_SubmitJobBG
 	}
-	handle, err = client.do(funcname, data, datatype)
+
+	handle = client.submit(pt, funcname, arg)
+
 	return
 }
 
@@ -369,7 +343,9 @@ func (client *Client) doCron(funcname string, cronExpr string, funcParam []byte)
 		return "", err
 	}
 	dbyt := []byte(fmt.Sprintf("%v%v", string(ce.Bytes()), string(funcParam)))
-	handle, err = client.do(funcname, dbyt, rt.PT_SubmitJobSched)
+
+	handle = client.submit(rt.PT_SubmitJobSched, funcname, dbyt)
+
 	return
 }
 
@@ -377,50 +353,45 @@ func (client *Client) DoAt(funcname string, epoch int64, funcParam []byte) (hand
 	if client.conn == nil {
 		return "", ErrLostConn
 	}
+
 	dbyt := []byte(fmt.Sprintf("%v\x00%v", epoch, string(funcParam)))
-	handle, err = client.do(funcname, dbyt, rt.PT_SubmitJobEpoch)
+
+	handle = client.submit(rt.PT_SubmitJobEpoch, funcname, dbyt)
+
 	return
 }
 
 // Get job status from job server.
 func (client *Client) Status(handle string) (status *Status, err error) {
-	if client.conn == nil {
-		return nil, ErrLostConn
+	if err = client.reconnect(nil); err != nil {
+		return
 	}
-	var mutex sync.Mutex
-	mutex.Lock()
-	client.innerHandler.put("s"+handle, func(resp *Response) {
-		defer mutex.Unlock()
-		var err error
-		status, err = resp._status()
-		if err != nil {
-			client.err(err)
-		}
-	})
-	req := getRequest()
-	req.DataType = rt.PT_GetStatus
-	req.Data = []byte(handle)
-	client.write(req)
-	mutex.Lock()
+
+	client.outbound <- client.request().status(handle)
+
+	res := <-client.expected
+
+	status, err = res.Status()
+
+	client.responsePool.Put(res)
+
 	return
 }
 
 // Echo.
 func (client *Client) Echo(data []byte) (echo []byte, err error) {
-	if client.conn == nil {
-		return nil, ErrLostConn
+	if err = client.reconnect(nil); err != nil {
+		return
 	}
-	var mutex sync.Mutex
-	mutex.Lock()
-	client.innerHandler.put("e", func(resp *Response) {
-		echo = resp.Data
-		mutex.Unlock()
-	})
-	req := getRequest()
-	req.DataType = rt.PT_EchoReq
-	req.Data = data
-	client.write(req)
-	mutex.Lock()
+
+	client.outbound <- client.request().echo(data)
+
+	res := <-client.expected
+
+	echo = res.Data
+
+	client.responsePool.Put(res)
+
 	return
 }
 
