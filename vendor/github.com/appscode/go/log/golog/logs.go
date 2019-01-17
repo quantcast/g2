@@ -11,7 +11,7 @@ func init() {
 	flag.Set("stderrthreshold", "INFO")
 }
 
-// LogWriter serves as a bridge between the standard log package and the appscode/log package.
+// LogWriter serves as a bridge between the standard log package and the ssmccoy/log package.
 type LogWriter struct{}
 
 // Write implements the io.Writer interface.

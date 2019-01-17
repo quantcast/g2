@@ -13,8 +13,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/appscode/g2/pkg/runtime"
-	"github.com/appscode/go/log"
+	"github.com/ssmccoy/g2/pkg/runtime"
+	"github.com/ssmccoy/go/log"
 )
 
 var (

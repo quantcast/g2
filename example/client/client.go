@@ -5,8 +5,8 @@ import (
 	"os"
 	"sync"
 
-	"github.com/appscode/g2/client"
-	rt "github.com/appscode/g2/pkg/runtime"
+	"github.com/ssmccoy/g2/client"
+	rt "github.com/ssmccoy/g2/pkg/runtime"
 )
 
 func main() {

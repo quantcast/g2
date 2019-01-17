@@ -9,7 +9,7 @@
 //
 //         import (
 //         	"fmt"
-//         	"github.com/appscode/g2/gearadmin"
+//         	"github.com/ssmccoy/g2/gearadmin"
 //         	"net"
 //         )
 //

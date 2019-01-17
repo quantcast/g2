@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/appscode/g2/client"
-	rt "github.com/appscode/g2/pkg/runtime"
+	"github.com/ssmccoy/g2/client"
+	rt "github.com/ssmccoy/g2/pkg/runtime"
 )
 
 const port = `3700`

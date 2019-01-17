@@ -7,7 +7,7 @@ import (
 	"reflect"
 	"strings"
 
-	"github.com/appscode/g2/pkg/storage"
+	"github.com/ssmccoy/g2/pkg/storage"
 	"github.com/syndtr/goleveldb/leveldb"
 	"github.com/syndtr/goleveldb/leveldb/util"
 )

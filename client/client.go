@@ -11,8 +11,8 @@ import (
 	"sync"
 	"time"
 
-	rt "github.com/appscode/g2/pkg/runtime"
-	"github.com/appscode/go/log"
+	rt "github.com/ssmccoy/g2/pkg/runtime"
+	"github.com/ssmccoy/go/log"
 )
 
 var (

@@ -8,7 +8,7 @@ import (
 	"net"
 	"sync"
 
-	rt "github.com/appscode/g2/pkg/runtime"
+	rt "github.com/ssmccoy/g2/pkg/runtime"
 )
 
 // The agent of job server.

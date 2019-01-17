@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"testing"
 
-	rt "github.com/appscode/g2/pkg/runtime"
+	rt "github.com/ssmccoy/g2/pkg/runtime"
 )
 
 var (

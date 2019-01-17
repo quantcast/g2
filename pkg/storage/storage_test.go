@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	. "github.com/appscode/g2/pkg/runtime"
-	. "github.com/appscode/g2/pkg/storage"
-	. "github.com/appscode/g2/pkg/storage/leveldb"
+	. "github.com/ssmccoy/g2/pkg/runtime"
+	. "github.com/ssmccoy/g2/pkg/storage"
+	. "github.com/ssmccoy/g2/pkg/storage/leveldb"
 	"github.com/stretchr/testify/assert"
 )
 

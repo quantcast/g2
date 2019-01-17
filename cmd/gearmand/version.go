@@ -1,7 +1,7 @@
 package main
 
 import (
-	v "github.com/appscode/go/version"
+	v "github.com/ssmccoy/go/version"
 )
 
 var (
