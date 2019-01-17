@@ -79,6 +79,7 @@ const (
 	BufferSize = 1024 * 1024
 	// min packet length
 	MinPacketLength = 12
+	HeaderSize      = 4 + 4 + 4
 
 	// \x00REQ
 	Req    = 5391697

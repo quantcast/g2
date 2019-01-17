@@ -4,19 +4,23 @@ package client
 
 import (
 	"bufio"
+	"bytes"
+	"encoding/binary"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"strings"
 	"sync"
 	"time"
 
-	rt "github.com/ssmccoy/g2/pkg/runtime"
 	"github.com/appscode/go/log"
+	rt "github.com/ssmccoy/g2/pkg/runtime"
 )
 
 var (
 	DefaultTimeout time.Duration = time.Second
+	Null                         = byte('\x00')
 )
 
 // One client connect to one server.
@@ -112,59 +116,109 @@ func (client *Client) read(length int) (data []byte, err error) {
 	return
 }
 
+func decodeHeader(header []byte) (code []byte, pt uint32, length int) {
+	code = header[0:4]
+	pt = binary.BigEndian.Uint32(header[4:8])
+	length = int(binary.BigEndian.Uint32(header[8:12]))
+
+	return
+}
+
+func (client *Client) reconnect(err error) error {
+	// TODO I doubt this error handling is right because it looks
+	// really complicated.
+	if opErr, ok := err.(*net.OpError); ok {
+		if opErr.Timeout() {
+			client.err(err)
+		}
+		if opErr.Temporary() {
+			return nil
+		}
+
+		return err
+	}
+
+	if err != nil {
+		client.err(err)
+	}
+
+	// If it is unexpected error and the connection wasn't
+	// closed by Gearmand, the client should close the conection
+	// and reconnect to job server.
+	client.Close()
+	client.conn, err = net.Dial(client.net, client.addr)
+
+	if err != nil {
+		client.err(err)
+		return err
+	}
+
+	client.rw = bufio.NewReadWriter(bufio.NewReader(client.conn),
+		bufio.NewWriter(client.conn))
+
+	return nil
+}
+
 func (client *Client) readLoop() {
 	defer close(client.in)
-	var data, leftdata []byte
+
+	header := make([]byte, rt.HeaderSize)
+
 	var err error
 	var resp *Response
-ReadLoop:
+
 	for client.conn != nil {
-		if data, err = client.read(rt.BufferSize); err != nil {
-			if opErr, ok := err.(*net.OpError); ok {
-				if opErr.Timeout() {
-					client.err(err)
-				}
-				if opErr.Temporary() {
-					continue
-				}
+		if _, err = io.ReadFull(client.rw, header); err != nil {
+			if err = client.reconnect(err); err != nil {
 				break
 			}
-			client.err(err)
-			// If it is unexpected error and the connection wasn't
-			// closed by Gearmand, the client should close the conection
-			// and reconnect to job server.
-			client.Close()
-			client.conn, err = net.Dial(client.net, client.addr)
-			if err != nil {
-				client.err(err)
-				break
-			}
-			client.rw = bufio.NewReadWriter(bufio.NewReader(client.conn),
-				bufio.NewWriter(client.conn))
+
 			continue
 		}
-		if len(leftdata) > 0 { // some data left for processing
-			data = append(leftdata, data...)
-			leftdata = nil
+
+		_, pt, length := decodeHeader(header)
+
+		contents := make([]byte, length)
+
+		if _, err = io.ReadFull(client.rw, contents); err != nil {
+			if err = client.reconnect(err); err != nil {
+				break
+			}
+
+			continue
 		}
-		for {
-			l := len(data)
-			if l < rt.MinPacketLength { // not enough data
-				leftdata = data
-				continue ReadLoop
-			}
-			if resp, l, err = decodeResponse(data); err != nil {
-				leftdata = data[l:]
-				continue ReadLoop
-			} else {
-				client.in <- resp
-			}
-			data = data[l:]
-			if len(data) > 0 {
-				continue
-			}
-			break
+
+		resp = getResponse()
+
+		resp.DataType, err = rt.NewPT(pt)
+		if err != nil {
+			client.err(err)
+			continue
 		}
+
+		switch resp.DataType {
+		case rt.PT_JobCreated:
+			resp.Handle = string(contents)
+
+		case rt.PT_StatusRes, rt.PT_WorkData, rt.PT_WorkWarning, rt.PT_WorkStatus,
+			rt.PT_WorkComplete, rt.PT_WorkException:
+
+			sl := bytes.IndexByte(contents, Null)
+
+			resp.Handle = string(contents[:sl])
+			resp.Data = contents[sl+1:]
+
+		case rt.PT_WorkFail:
+			resp.Handle = string(contents)
+
+		case rt.PT_EchoRes:
+			fallthrough
+
+		default:
+			resp.Data = contents
+		}
+
+		client.in <- resp
 	}
 }
 
