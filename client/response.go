@@ -16,6 +16,7 @@ type Response struct {
 	DataType  rt.PT
 	Data, UID []byte
 	Handle    string
+	err       error
 }
 
 // Extract the Response's result.
