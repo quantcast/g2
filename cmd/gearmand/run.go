@@ -5,7 +5,7 @@ import (
 	"os"
 
 	gearmand "github.com/ssmccoy/g2/pkg/server"
-	"github.com/ssmccoy/go/runtime"
+	"github.com/appscode/go/runtime"
 	"github.com/spf13/cobra"
 )
 

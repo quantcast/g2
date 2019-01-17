@@ -8,7 +8,7 @@ import (
 	"time"
 
 	. "github.com/ssmccoy/g2/pkg/runtime"
-	"github.com/ssmccoy/go/log"
+	"github.com/appscode/go/log"
 )
 
 type session struct {

@@ -6,8 +6,8 @@ import (
 	"log"
 	"os"
 
-	logs "github.com/ssmccoy/go/log/golog"
-	"github.com/ssmccoy/go/version"
+	logs "github.com/appscode/go/log/golog"
+	"github.com/appscode/go/version"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 )

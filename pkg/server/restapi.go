@@ -3,8 +3,8 @@ package server
 import (
 	"net/http"
 
-	"github.com/ssmccoy/go/runtime"
-	"github.com/ssmccoy/pat"
+	"github.com/appscode/go/runtime"
+	"github.com/appscode/pat"
 )
 
 func safeHandler(f func(w http.ResponseWriter, r *http.Request)) http.Handler {

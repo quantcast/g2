@@ -7,7 +7,7 @@ import (
 	"time"
 
 	rt "github.com/ssmccoy/g2/pkg/runtime"
-	"github.com/ssmccoy/go/log"
+	"github.com/appscode/go/log"
 )
 
 const (

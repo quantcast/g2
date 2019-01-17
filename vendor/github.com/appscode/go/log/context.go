@@ -4,7 +4,7 @@ import (
 	gtx "context"
 	"fmt"
 
-	"github.com/ssmccoy/go/context"
+	"github.com/appscode/go/context"
 	"github.com/golang/glog"
 )
 
