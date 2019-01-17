@@ -2,7 +2,6 @@ package client
 
 import (
 	"bytes"
-	"encoding/binary"
 	"fmt"
 	"strconv"
 
@@ -52,58 +51,6 @@ func (resp *Response) Update() (data []byte, err error) {
 	if resp.DataType == rt.PT_WorkWarning {
 		err = ErrWorkWarning
 	}
-	return
-}
-
-// Decode a job from byte slice
-func decodeResponse(data []byte) (resp *Response, l int, err error) {
-	a := len(data)
-	if a < rt.MinPacketLength { // valid package should not less 12 bytes
-		err = fmt.Errorf("Invalid data: %v", data)
-		return
-	}
-	dl := int(binary.BigEndian.Uint32(data[8:12]))
-	if a < rt.MinPacketLength+dl {
-		err = fmt.Errorf("Invalid data: %v", data)
-		return
-	}
-	dt := data[rt.MinPacketLength : dl+rt.MinPacketLength]
-	if len(dt) != int(dl) { // length not equal
-		err = fmt.Errorf("Invalid data: %v", data)
-		return
-	}
-	resp = getResponse()
-	resp.DataType, err = rt.NewPT(binary.BigEndian.Uint32(data[4:8]))
-	if err != nil {
-		return
-	}
-	switch resp.DataType {
-	case rt.PT_JobCreated:
-		resp.Handle = string(dt)
-	case rt.PT_StatusRes, rt.PT_WorkData, rt.PT_WorkWarning, rt.PT_WorkStatus,
-		rt.PT_WorkComplete, rt.PT_WorkException:
-		s := bytes.SplitN(dt, []byte{'\x00'}, 2)
-		if len(s) >= 2 {
-			resp.Handle = string(s[0])
-			resp.Data = s[1]
-		} else {
-			err = fmt.Errorf("Invalid data: %v", data)
-			return
-		}
-	case rt.PT_WorkFail:
-		s := bytes.SplitN(dt, []byte{'\x00'}, 2)
-		if len(s) >= 1 {
-			resp.Handle = string(s[0])
-		} else {
-			err = fmt.Errorf("Invalid data: %v", data)
-			return
-		}
-	case rt.PT_EchoRes:
-		fallthrough
-	default:
-		resp.Data = dt
-	}
-	l = dl + rt.MinPacketLength
 	return
 }
 
