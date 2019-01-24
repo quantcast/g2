@@ -1,164 +1,239 @@
 package client
 
 import (
+	"bufio"
+	"bytes"
+	"encoding/hex"
+	"errors"
 	"fmt"
-	"sync"
+	"io"
+	"net"
+	"os"
+	"reflect"
+	"strings"
 	"testing"
-	"time"
 
 	rt "github.com/ssmccoy/g2/pkg/runtime"
-	"github.com/appscode/go/log"
+	//"time"
 )
 
-const (
-	TestStr = "Hello world"
-)
+type snapshot struct {
+	filenames map[string]map[string]string
+}
 
-var client *Client
+func loadSnapshot(directory string) (s *snapshot, err error) {
+	manifest, err := os.OpenFile(directory+"/manifest", os.O_RDONLY, 0)
 
-func init() {
-	if client == nil {
-		var err error
-		client, err = New(rt.Network, "127.0.0.1:4730")
+	if err != nil {
+		return
+	}
+
+	scanner := bufio.NewScanner(manifest)
+
+	filenames := make(map[string]map[string]string)
+	addresses := make(map[string]string)
+
+	for scanner.Scan() {
+		line := scanner.Bytes()
+
+		parts := strings.Split(string(line), " ")
+
+		if len(parts) != 2 {
+			panic(fmt.Sprintf("Expected space delimited input, saw: \"%s\"", line))
+		}
+
+		source, address := parts[0], parts[1]
+
+		addresses[source] = address
+	}
+
+	convos := [][]string{
+		[]string{"client", "server"},
+		[]string{"server", "client"},
+		[]string{"worker", "server"},
+		[]string{"server", "worker"},
+	}
+
+	for _, components := range convos {
+		sender, recipient := components[0], components[1]
+
+		if _, ok := filenames[sender]; !ok {
+			filenames[sender] = make(map[string]string)
+		}
+
+		filenames[sender][recipient] = fmt.Sprintf("%s/%s-%s", directory, addresses[sender], addresses[recipient])
+	}
+
+	s = &snapshot{filenames}
+
+	return
+}
+
+func (s *snapshot) load(sender, recipient string) (r io.Reader, err error) {
+	if fn, ok := s.filenames[sender][recipient]; ok {
+		var convo *os.File
+
+		convo, err = os.OpenFile(fn, os.O_RDONLY, 0)
+
 		if err != nil {
-			log.Fatalln(err)
+			return
 		}
-	}
-}
 
-func TestClientAddServer(t *testing.T) {
-	t.Log("Add local server 127.0.0.1:4730")
-	var err error
-	if client, err = New(rt.Network, "127.0.0.1:4730"); err != nil {
-		t.Fatal(err)
-	}
-	client.ErrorHandler = func(e error) {
-		t.Log(e)
-	}
-}
+		defer convo.Close()
 
-func TestClientEcho(t *testing.T) {
-	echo, err := client.Echo([]byte(TestStr))
-	if err != nil {
-		t.Error(err)
-		return
-	}
-	if string(echo) != TestStr {
-		t.Errorf("Echo error, %s expected, %s got", TestStr, echo)
-		return
-	}
-}
+		buffer := &bytes.Buffer{}
 
-func TestClientDoBg(t *testing.T) {
-	handle, err := client.DoBg("scheduledJobTest", []byte("abcdef"), rt.JobNormal)
-	if err != nil {
-		t.Error(err)
-		return
-	}
-	if handle == "" {
-		t.Error("Handle is empty.")
+		_, err = buffer.ReadFrom(convo)
+
+		r = buffer
 	} else {
-		t.Log(handle)
+		err = errors.New(fmt.Sprintf("%s -> %s missing from snapshot", sender,
+			recipient))
 	}
+
+	return
 }
 
-func TestClientDoCron(t *testing.T) {
-	handle, err := client.DoCron("scheduledJobTest", "* * * * 5", []byte("test data"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if handle == "" {
-		t.Error("Handle is empty.")
-	} else {
-		t.Log(handle)
-	}
-}
+// Replay the specified part of the conversation to the given writer
+//
+// This happens blindly in the background but panics if any error occurs.
+func (s *snapshot) replay(stream io.Writer, sender, recipient string) error {
+	convo, err := s.load(sender, recipient)
 
-func TestClientDoAt(t *testing.T) {
-	handle, err := client.DoAt("scheduledJobTest", time.Now().Add(20*time.Second).Unix(), []byte("test data"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if handle == "" {
-		t.Error("Handle is empty.")
-	} else {
-		t.Log(handle)
-	}
-}
+	if err == nil {
+		go func() {
+			_, err := io.Copy(stream, convo)
 
-func TestClientDo(t *testing.T) {
-	var wg sync.WaitGroup = sync.WaitGroup{}
-	wg.Add(1)
-	jobHandler := func(job *Response) {
-		switch job.DataType {
-		case rt.PT_WorkComplete:
-			t.Log("Work complete, handle ", job.Handle)
-			wg.Done()
-		case rt.PT_WorkException, rt.PT_WorkFail:
-			t.Log("Work fail, handle ", job.Handle, " cause: ", string(job.Data))
-			wg.Done()
-		case rt.PT_WorkData:
-			t.Logf("Work data: %+v", string(job.Data))
-		case rt.PT_WorkStatus:
-			status, err := job.Status()
 			if err != nil {
-				t.Error(err)
+				panic(err)
 			}
-			fmt.Printf("Work status, num: %v, denom: %v\n", status.Numerator, status.Denominator)
-		}
-	}
-	handle, err := client.Do("scheduledJobTest", []byte("abcdef"),
-		rt.JobHigh, jobHandler)
-	if err != nil {
-		t.Error(err)
-		return
-	}
-	if handle == "" {
-		t.Error("Handle is empty.")
+		}()
 	} else {
-		t.Log(handle)
+		panic(err)
 	}
-	wg.Wait()
 
+	return err
 }
 
-func TestClientStatus(t *testing.T) {
-	status, err := client.Status("handle not exists")
-	if err != nil {
-		t.Error(err)
-		return
-	}
-	if status.Known {
-		t.Errorf("The job (%s) shouldn't be known.", status.Handle)
-		return
-	}
-	if status.Running {
-		t.Errorf("The job (%s) shouldn't be running.", status.Handle)
-		return
-	}
+func verifyObservation(errors chan error, observation io.Reader, expectation io.Reader) {
+	running := true
 
-	handle, err := client.Do("Delay5sec", []byte("abcdef"), rt.JobLow, nil)
-	if err != nil {
-		t.Error(err)
-		return
-	}
-	status, err = client.Status(handle)
-	if err != nil {
-		t.Error(err)
-		return
-	}
-	if !status.Known {
-		t.Errorf("The job (%s) should be known.", status.Handle)
-		return
-	}
-	if status.Running {
-		t.Errorf("The job (%s) shouldn't be running.", status.Handle)
-		return
+	observed := make([]byte, 1024)
+	expected := make([]byte, 1024)
+
+	var o, e int
+	var err error
+
+	for running {
+		o, err = observation.Read(observed)
+
+		if err != nil {
+			errors <- fmt.Errorf("unexpected error reading client input: %s", err)
+
+			break
+		}
+
+		e, err = io.ReadFull(expectation, expected[0:o])
+
+		if err == io.EOF {
+			running = false
+		}
+
+		if err != nil {
+			errors <- fmt.Errorf("unexpected error reading snapshot input: %s", err)
+
+			break
+		}
+
+		fmt.Printf("read from snapshot\n")
+
+		if !reflect.DeepEqual(observed[0:o], expected[0:e]) {
+			errors <- fmt.Errorf("input expectation mismatch: \n%s\n\n%s\n",
+				hex.Dump(observed[0:o]), hex.Dump(expected[0:e]))
+
+			break
+		}
+
+		fmt.Printf("compared client and snapshot input\n")
 	}
 }
 
-func TestClientClose(t *testing.T) {
-	if err := client.Close(); err != nil {
-		t.Error(err)
+func (s *snapshot) validate(errors chan error, observation io.Reader, sender, recipient string) {
+	expectation, err := s.load(sender, recipient)
+
+	if err != nil {
+		errors <- err
+
+		return
+	}
+
+	go verifyObservation(errors, expectation, observation)
+}
+
+// Read from the given reader in the background until there was an error
+func drain(observed io.Reader) {
+	go func() {
+		var err error
+
+		buf := make([]byte, 1024)
+
+		for err == nil {
+			_, err = observed.Read(buf)
+		}
+
+		if err != io.EOF {
+			panic(err)
+		}
+	}()
+}
+
+func TestClose(test *testing.T) {
+	client, _ := net.Pipe()
+
+	gearmanc := NewConnected(client)
+
+	if gearmanc.Close() != nil {
+		test.Fatalf("expected no error in closing connected client")
+	}
+
+	if gearmanc.Close() == nil {
+		test.Fatalf("expected error closing disconnected client")
+	}
+}
+
+func TestSnapshot(test *testing.T) {
+	client, server := net.Pipe()
+
+	snapshot, err := loadSnapshot("perl")
+
+	if err != nil {
+		test.Fatalf("error loading snapshot: %s\n", err)
+	}
+
+	// This has to be done in another go-routine since all of the reads/writes
+	// are synchronous
+	gearmanClient := NewConnected(client)
+
+	if err = snapshot.replay(server, "server", "client"); err != nil {
+		test.Fatalf("error loading snapshot: %s", err)
+	}
+
+	drain(server)
+
+	payload := []byte("1548268329.11348:x")
+
+	errors := make(chan error)
+
+	go gearmanClient.Do("test", payload, rt.JobNormal, func(r *Response) {
+		if !reflect.DeepEqual(payload, r.Data) {
+			errors <- fmt.Errorf("\nexpected:\n%s\nobserved:\n%s\n",
+				hex.Dump(payload), hex.Dump(r.Data))
+		}
+
+		close(errors)
+	})
+
+	for err := range errors {
+		test.Fatalf("error: %s", err)
 	}
 }

@@ -173,6 +173,15 @@ func (i PT) Uint32() uint32 {
 	return uint32(i)
 }
 
+func (i PT) ExpectsResponse() bool {
+	switch i {
+	case PT_SubmitJob, PT_SubmitJobHigh, PT_SubmitJobBG, PT_SubmitJobHighBG, PT_SubmitJobLowBG, PT_SubmitJobSched, PT_SubmitJobEpoch, PT_SubmitReduceJob, PT_SubmitReduceJobBackground, PT_StatusRes:
+		return true
+	default:
+		return false
+	}
+}
+
 func NewPT(cmd uint32) (PT, error) {
 	if cmd >= PT_CanDo.Uint32() && cmd <= PT_SubmitJobEpoch.Uint32() {
 		return PT(cmd), nil

@@ -89,24 +89,19 @@ func TestBasicDisconnect(t *testing.T) {
 	if err := worker.AddServer(rt.Network, "127.0.0.1:"+port); err != nil {
 		t.Error(err)
 	}
-	work_done := false
 	if err := worker.AddFunc("gearman-go-workertest",
 		func(j Job) (b []byte, e error) {
-			work_done = true
 			done <- true
 			return
 		}, 0); err != nil {
 		t.Error(err)
 	}
 
-	handled_errors := false
-
 	c_error := make(chan bool)
 	was_dc_err := false
 	worker.ErrorHandler = func(e error) {
 		log.Println(e)
 		_, was_dc_err = e.(*WorkerDisconnectError)
-		handled_errors = true
 		c_error <- true
 	}
 
@@ -164,11 +159,9 @@ func TestDcRc(t *testing.T) {
 	if err := worker.AddServer(rt.Network, "127.0.0.1:"+port); err != nil {
 		t.Error(err)
 	}
-	work_done := false
 	if err := worker.AddFunc("gearman-go-workertest",
 		func(j Job) (b []byte, e error) {
 			log.Println("Actual work happens!")
-			work_done = true
 			done <- true
 			return
 		}, 0); err != nil {

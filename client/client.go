@@ -3,7 +3,6 @@
 package client
 
 import (
-	"bufio"
 	"bytes"
 	"encoding/binary"
 	"errors"
@@ -12,7 +11,9 @@ import (
 	"net"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
+	"unsafe"
 
 	"github.com/appscode/go/log"
 	rt "github.com/ssmccoy/g2/pkg/runtime"
@@ -24,17 +25,24 @@ var (
 	NullBytes                    = []byte{Null}
 )
 
+type connection struct {
+	// This simple wrapper struct is just a convenient way to deal with the
+	// fact that accessing the underlying pointer for an interface value type
+	// is not reasonably possible in Go. Using a pointer to a struct makes use
+	// of `atomic.SwapPointer` and `atomic.CompareAndSwapPointer` much more
+	// convenient.
+	net.Conn
+}
+
 // One client connect to one server.
 // Use Pool for multi-connections.
 type Client struct {
-	sync.Mutex
-
 	net, addr string
 	handlers  sync.Map
 	expected  chan *Response
 	outbound  chan *request
-	conn      net.Conn
-	rw        *bufio.ReadWriter
+	conn      *connection
+	//rw        *bufio.ReadWriter
 
 	responsePool *sync.Pool
 	requestPool  *sync.Pool
@@ -46,24 +54,32 @@ type Client struct {
 
 // Return a client.
 func New(network, addr string) (client *Client, err error) {
+	conn, err := net.Dial(network, addr)
+
+	if err != nil {
+		return
+	}
+
+	client = NewConnected(conn)
+
+	return
+}
+
+// Return a new client from an established connection. Largely used for
+// testing, though other use-cases can be imagined.
+func NewConnected(conn net.Conn) (client *Client) {
+	addr := conn.RemoteAddr()
+
 	client = &Client{
-		net:             network,
-		addr:            addr,
+		net:             addr.Network(),
+		addr:            addr.String(),
+		conn:            &connection{conn},
 		outbound:        make(chan *request),
 		expected:        make(chan *Response),
 		ResponseTimeout: DefaultTimeout,
 		responsePool:    &sync.Pool{New: func() interface{} { return &Response{} }},
 		requestPool:     &sync.Pool{New: func() interface{} { return &request{} }},
 	}
-
-	client.conn, err = net.Dial(client.net, client.addr)
-
-	if err != nil {
-		return
-	}
-
-	client.rw = bufio.NewReadWriter(bufio.NewReader(client.conn),
-		bufio.NewWriter(client.conn))
 
 	go client.readLoop()
 	go client.writeLoop()
@@ -80,11 +96,13 @@ func (client *Client) writeLoop() {
 	// goroutines to all write as quickly as possible, uses a channel and the
 	// writeLoop lives in a separate goroutine.
 	for req := range client.outbound {
-		client.rw.Write([]byte(rt.ReqStr))
+		client.conn.Write([]byte(rt.ReqStr))
+
+		// todo handle errors.
 
 		binary.BigEndian.PutUint32(ibuf, req.pt.Uint32())
 
-		client.rw.Write(ibuf)
+		client.conn.Write(ibuf)
 
 		length = 0
 
@@ -97,18 +115,16 @@ func (client *Client) writeLoop() {
 
 		binary.BigEndian.PutUint32(ibuf, length)
 
-		client.rw.Write(ibuf)
+		client.conn.Write(ibuf)
 
-		client.rw.Write(req.data[0])
+		client.conn.Write(req.data[0])
 
 		for i = 1; i < len(req.data); i++ {
-			client.rw.Write(NullBytes)
-			client.rw.Write(req.data[i])
+			client.conn.Write(NullBytes)
+			client.conn.Write(req.data[i])
 		}
 
 		client.requestPool.Put(req)
-
-		client.rw.Flush()
 	}
 }
 
@@ -146,15 +162,22 @@ func (client *Client) reconnect(err error) error {
 	// closed by Gearmand, the client should close the conection
 	// and reconnect to job server.
 	client.Close()
-	client.conn, err = net.Dial(client.net, client.addr)
+
+	conn, err := net.Dial(client.net, client.addr)
 
 	if err != nil {
 		client.err(err)
 		return err
 	}
 
-	client.rw = bufio.NewReadWriter(bufio.NewReader(client.conn),
-		bufio.NewWriter(client.conn))
+	swapped := atomic.CompareAndSwapPointer(
+		(*unsafe.Pointer)(unsafe.Pointer(&client.conn)),
+		unsafe.Pointer(nil),
+		unsafe.Pointer(&connection{conn}))
+
+	if !swapped {
+		return fmt.Errorf("client: unable to connect")
+	}
 
 	return nil
 }
@@ -166,7 +189,7 @@ func (client *Client) readLoop() {
 	var resp *Response
 
 	for client.conn != nil {
-		if _, err = io.ReadFull(client.rw, header); err != nil {
+		if _, err = io.ReadFull(*client.conn, header); err != nil {
 			if err = client.reconnect(err); err != nil {
 				break
 			}
@@ -178,7 +201,7 @@ func (client *Client) readLoop() {
 
 		contents := make([]byte, length)
 
-		if _, err = io.ReadFull(client.rw, contents); err != nil {
+		if _, err = io.ReadFull(client.conn, contents); err != nil {
 			if err = client.reconnect(err); err != nil {
 				break
 			}
@@ -228,7 +251,7 @@ func (client *Client) process(resp *Response) {
 
 		client.err(getError(resp.Data))
 
-		client.responsePool.Put(resp)
+		client.expected <- resp
 
 	case rt.PT_StatusRes, rt.PT_JobCreated, rt.PT_EchoRes:
 		// NOTE Anything which reads from `expected` must return the
@@ -256,23 +279,24 @@ func (client *Client) err(e error) {
 	}
 }
 
-type handleOrError struct {
-	handle string
-	err    error
-}
-
 func (client *Client) request() *request {
 	return client.requestPool.Get().(*request)
 }
 
-func (client *Client) submit(pt rt.PT, funcname string, arg []byte) string {
+func (client *Client) submit(pt rt.PT, funcname string, arg []byte) (string, error) {
+	var err error
+
 	client.outbound <- client.request().submitJob(pt, funcname, IdGen.Id(), arg)
 
 	res := <-client.expected
 
+	if res.DataType == rt.PT_Error {
+		err = getError(res.Data)
+	}
+
 	defer client.responsePool.Put(res)
 
-	return res.Handle
+	return res.Handle, err
 }
 
 // Call the function and get a response.
@@ -290,7 +314,7 @@ func (client *Client) Do(funcname string, arg []byte,
 		pt = rt.PT_SubmitJob
 	}
 
-	handle = client.submit(pt, funcname, arg)
+	handle, err = client.submit(pt, funcname, arg)
 
 	client.handlers.Store(handle, h)
 
@@ -310,7 +334,7 @@ func (client *Client) DoBg(funcname string, arg []byte, flag byte) (handle strin
 		pt = rt.PT_SubmitJobBG
 	}
 
-	handle = client.submit(pt, funcname, arg)
+	handle, err = client.submit(pt, funcname, arg)
 
 	return
 }
@@ -344,7 +368,7 @@ func (client *Client) doCron(funcname string, cronExpr string, funcParam []byte)
 	}
 	dbyt := []byte(fmt.Sprintf("%v%v", string(ce.Bytes()), string(funcParam)))
 
-	handle = client.submit(rt.PT_SubmitJobSched, funcname, dbyt)
+	handle, err = client.submit(rt.PT_SubmitJobSched, funcname, dbyt)
 
 	return
 }
@@ -356,7 +380,7 @@ func (client *Client) DoAt(funcname string, epoch int64, funcParam []byte) (hand
 
 	dbyt := []byte(fmt.Sprintf("%v\x00%v", epoch, string(funcParam)))
 
-	handle = client.submit(rt.PT_SubmitJobEpoch, funcname, dbyt)
+	handle, err = client.submit(rt.PT_SubmitJobEpoch, funcname, dbyt)
 
 	return
 }
@@ -397,11 +421,15 @@ func (client *Client) Echo(data []byte) (echo []byte, err error) {
 
 // Close connection
 func (client *Client) Close() (err error) {
-	client.Lock()
-	defer client.Unlock()
-	if client.conn != nil {
-		err = client.conn.Close()
-		client.conn = nil
+	ptr := atomic.SwapPointer((*unsafe.Pointer)(unsafe.Pointer(&client.conn)), nil)
+
+	conn := (*connection)(ptr)
+
+	if conn != nil {
+		err = conn.Close()
+
+		return
 	}
-	return
+
+	return fmt.Errorf("client disconnected")
 }
