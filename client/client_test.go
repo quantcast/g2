@@ -14,7 +14,6 @@ import (
 	"testing"
 
 	rt "github.com/ssmccoy/g2/pkg/runtime"
-	//"time"
 )
 
 type snapshot struct {
