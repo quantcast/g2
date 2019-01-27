@@ -165,6 +165,55 @@ const (
 	PT_StatusResUnique           // RES    Client
 )
 
+var labels map[PT]string = map[PT]string{
+	PT_CanDo:           "CAN_DO",
+	PT_CantDo:          "CANT_DO",
+	PT_ResetAbilities:  "RESET_ABILITIES",
+	PT_PreSleep:        "PRE_SLEEP",
+	PT_Noop:            "NOOP",
+	PT_SubmitJob:       "SUBMIT_JOB",
+	PT_JobCreated:      "JOB_CREATED",
+	PT_GrabJob:         "GRAB_JOB",
+	PT_NoJob:           "NO_JOB",
+	PT_JobAssign:       "JOB_ASSIGN",
+	PT_WorkStatus:      "WORK_STATUS",
+	PT_WorkComplete:    "WORK_COMPLETE",
+	PT_WorkFail:        "WORK_FAIL",
+	PT_GetStatus:       "GET_STATUS",
+	PT_EchoReq:         "ECHO_REQ",
+	PT_EchoRes:         "ECHO_RES",
+	PT_SubmitJobBG:     "SUBMIT_JOB_BG",
+	PT_Error:           "ERROR",
+	PT_StatusRes:       "STATUS_RES",
+	PT_SubmitJobHigh:   "SUBMIT_JOB_HIGH",
+	PT_SetClientId:     "SET_CLIENT_ID",
+	PT_CanDoTimeout:    "CAN_DO_TIMEOUT",
+	PT_AllYours:        "ALL_YOURS",
+	PT_WorkException:   "WORK_EXCEPTION",
+	PT_OptionReq:       "OPTION_REQ",
+	PT_OptionRes:       "OPTION_RES",
+	PT_WorkData:        "WORK_DATA",
+	PT_WorkWarning:     "WORK_WARNING",
+	PT_GrabJobUniq:     "GRAB_JOB_UNIQ",
+	PT_JobAssignUniq:   "JOB_ASSIGN_UNIQ",
+	PT_SubmitJobHighBG: "SUBMIT_JOB_HIGH_BG",
+	PT_SubmitJobLow:    "SUBMIT_JOB_LOW",
+	PT_SubmitJobLowBG:  "SUBMIT_JOB_LOW_BG",
+	PT_SubmitJobSched:  "SUBMIT_JOB_SCHED",
+	PT_SubmitJobEpoch:  "SUBMIT_JOB_EPOCH",
+	// New Codes (ref: https://github.com/gearman01030a16c80bada1e06c4162f8d129a5e8)
+	PT_SubmitReduceJob:           "SUBMIT_REDUCE_JOB",
+	PT_SubmitReduceJobBackground: "SUBMIT_REDUCE_JOB_BG",
+	PT_GrabJobAll:                "GRAB_JOB_ALL",
+	PT_JobAssignAll:              "JOB_ASSIGN_ALL",
+	PT_GetStatusUnique:           "GET_STATUS_UNIQ",
+	PT_StatusResUnique:           "STATUS_RES_UNIQ",
+}
+
+func (i PT) String() string {
+	return labels[i]
+}
+
 func (i PT) Int() int {
 	return int(i)
 }
