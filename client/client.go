@@ -215,6 +215,9 @@ func (client *Client) readLoop() {
 
 		if err != nil {
 			client.err(err)
+
+			client.responsePool.Put(resp)
+
 			continue
 		}
 
@@ -245,6 +248,9 @@ func (client *Client) readLoop() {
 }
 
 func (client *Client) process(resp *Response) {
+	// NOTE Any waiting goroutine which reads from `expected` should return the
+	// response object to the pool; but the conditions which handle it
+	// terminally should return it here.
 	switch resp.DataType {
 	case rt.PT_Error:
 		log.Errorln("Received error", resp.Data)
@@ -254,8 +260,6 @@ func (client *Client) process(resp *Response) {
 		client.expected <- resp
 
 	case rt.PT_StatusRes, rt.PT_JobCreated, rt.PT_EchoRes:
-		// NOTE Anything which reads from `expected` must return the
-		// response object to the pool.
 		client.expected <- resp
 	case rt.PT_WorkComplete, rt.PT_WorkFail, rt.PT_WorkException:
 		defer client.handlers.Delete(resp.Handle)
@@ -267,6 +271,8 @@ func (client *Client) process(resp *Response) {
 			if h, ok := handler.(ResponseHandler); ok {
 				h(resp)
 			}
+		} else {
+			client.err(fmt.Errorf("unexpected %s response for \"%s\" with no handler", resp.DataType, resp.Handle))
 		}
 
 		client.responsePool.Put(resp)
@@ -283,10 +289,10 @@ func (client *Client) request() *request {
 	return client.requestPool.Get().(*request)
 }
 
-func (client *Client) submit(pt rt.PT, funcname string, arg []byte) (string, error) {
+func (client *Client) submit(pt rt.PT, funcname string, payload []byte) (string, error) {
 	var err error
 
-	client.outbound <- client.request().submitJob(pt, funcname, IdGen.Id(), arg)
+	client.outbound <- client.request().submitJob(pt, funcname, IdGen.Id(), payload)
 
 	res := <-client.expected
 
@@ -301,7 +307,7 @@ func (client *Client) submit(pt rt.PT, funcname string, arg []byte) (string, err
 
 // Call the function and get a response.
 // flag can be set to: JobLow, JobNormal and JobHigh
-func (client *Client) Do(funcname string, arg []byte,
+func (client *Client) Do(funcname string, payload []byte,
 	flag byte, h ResponseHandler) (handle string, err error) {
 	var pt rt.PT
 
@@ -314,7 +320,7 @@ func (client *Client) Do(funcname string, arg []byte,
 		pt = rt.PT_SubmitJob
 	}
 
-	handle, err = client.submit(pt, funcname, arg)
+	handle, err = client.submit(pt, funcname, payload)
 
 	client.handlers.Store(handle, h)
 
@@ -323,7 +329,7 @@ func (client *Client) Do(funcname string, arg []byte,
 
 // Call the function in background, no response needed.
 // flag can be set to: JobLow, JobNormal and JobHigh
-func (client *Client) DoBg(funcname string, arg []byte, flag byte) (handle string, err error) {
+func (client *Client) DoBg(funcname string, payload []byte, flag byte) (handle string, err error) {
 	var pt rt.PT
 	switch flag {
 	case rt.JobLow:
@@ -334,7 +340,7 @@ func (client *Client) DoBg(funcname string, arg []byte, flag byte) (handle strin
 		pt = rt.PT_SubmitJobBG
 	}
 
-	handle, err = client.submit(pt, funcname, arg)
+	handle, err = client.submit(pt, funcname, payload)
 
 	return
 }
