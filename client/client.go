@@ -176,7 +176,7 @@ func (client *Client) reconnect(err error) error {
 		unsafe.Pointer(&connection{conn}))
 
 	if !swapped {
-		return fmt.Errorf("client: unable to connect")
+		conn.Close()
 	}
 
 	return nil
