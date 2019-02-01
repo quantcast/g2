@@ -189,7 +189,7 @@ func (client *Client) readLoop() {
 	var resp *Response
 
 	for client.conn != nil {
-		if _, err = io.ReadFull(*client.conn, header); err != nil {
+		if _, err = io.ReadFull(client.conn, header); err != nil {
 			if err = client.reconnect(err); err != nil {
 				break
 			}
