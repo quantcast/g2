@@ -29,6 +29,7 @@ func newAgent(net, addr string, worker *Worker) (a *agent, err error) {
 		worker: worker,
 		in:     make(chan []byte, rt.QueueSize),
 	}
+	err = a.Connect()
 	return
 }
 
@@ -37,11 +38,10 @@ func (a *agent) Connect() (err error) {
 	defer a.Unlock()
 	a.conn, err = net.Dial(a.net, a.addr)
 	if err != nil {
-		return
+		return err
 	}
 	a.rw = bufio.NewReadWriter(bufio.NewReader(a.conn),
 		bufio.NewWriter(a.conn))
-	go a.work()
 	return
 }
 

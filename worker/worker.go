@@ -186,9 +186,7 @@ func (worker *Worker) Ready() (err error) {
 		return ErrNoneFuncs
 	}
 	for _, a := range worker.agents {
-		if err = a.Connect(); err != nil {
-			return
-		}
+		go a.work()
 	}
 
 	// `once` protects registering worker functions multiple times.
