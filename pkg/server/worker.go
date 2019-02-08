@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"net"
 
-	. "github.com/ssmccoy/g2/pkg/runtime"
+	. "github.com/quantcast/g2/pkg/runtime"
 )
 
 const (

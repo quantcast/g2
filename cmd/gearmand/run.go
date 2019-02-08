@@ -4,7 +4,7 @@ import (
 	_ "net/http/pprof"
 	"os"
 
-	gearmand "github.com/ssmccoy/g2/pkg/server"
+	gearmand "github.com/quantcast/g2/pkg/server"
 	"github.com/appscode/go/runtime"
 	"github.com/spf13/cobra"
 )

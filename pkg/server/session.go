@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	. "github.com/ssmccoy/g2/pkg/runtime"
+	. "github.com/quantcast/g2/pkg/runtime"
 	"github.com/appscode/go/log"
 )
 

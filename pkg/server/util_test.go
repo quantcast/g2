@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"testing"
 
-	. "github.com/ssmccoy/g2/pkg/runtime"
+	. "github.com/quantcast/g2/pkg/runtime"
 )
 
 func TestDecodeArgs(t *testing.T) {

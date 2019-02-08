@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ssmccoy/g2/worker"
+	"github.com/quantcast/g2/worker"
 	"github.com/mikespook/golib/signal"
 )
 
