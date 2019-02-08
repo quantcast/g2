@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"testing"
 
-	rt "github.com/ssmccoy/g2/pkg/runtime"
+	rt "github.com/quantcast/g2/pkg/runtime"
 )
 
 var (

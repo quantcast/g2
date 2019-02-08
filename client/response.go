@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strconv"
 
-	rt "github.com/ssmccoy/g2/pkg/runtime"
+	rt "github.com/quantcast/g2/pkg/runtime"
 )
 
 // Response handler

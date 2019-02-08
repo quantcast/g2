@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ssmccoy/g2/client"
-	rt "github.com/ssmccoy/g2/pkg/runtime"
+	"github.com/quantcast/g2/client"
+	rt "github.com/quantcast/g2/pkg/runtime"
 )
 
 const port = `3700`
