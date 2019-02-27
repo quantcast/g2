@@ -79,10 +79,14 @@ func (worker *Worker) AddServer(net, addr string) (err error) {
 }
 
 // Broadcast an outpack to all Gearman server.
-func (worker *Worker) broadcast(outpack *outPack) {
+func (worker *Worker) broadcast(outpack *outPack) (err error) {
 	for _, v := range worker.agents {
-		v.write(outpack)
+		err = v.write(outpack)
+		if err != nil {
+			return
+		}
 	}
+	return nil
 }
 
 // Add a function.
@@ -258,11 +262,11 @@ func (worker *Worker) Reconnect() error {
 }
 
 // Echo
-func (worker *Worker) Echo(data []byte) {
+func (worker *Worker) Echo(data []byte) error {
 	outpack := getOutPack()
 	outpack.dataType = rt.PT_EchoReq
 	outpack.data = data
-	worker.broadcast(outpack)
+	return worker.broadcast(outpack)
 }
 
 // Remove all of functions.
