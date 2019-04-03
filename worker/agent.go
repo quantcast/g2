@@ -109,7 +109,7 @@ func (a *agent) reconnect_error(err error) {
 	if a.conn != nil {
 		err = &WorkerDisconnectError{
 			err:   err,
-			Agent: a,
+			agent: a,
 		}
 		a.worker.err(err)
 	}
