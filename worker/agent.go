@@ -86,7 +86,7 @@ func (a *agent) work() {
 			}
 			for {
 				if inpack, l, err = decodeInPack(data); err != nil {
-					a.worker.err(err) // when supplying the agent ref we are allowing to recycle the connection to this gearman server
+					a.worker.err(err)
 					leftdata = data
 					break
 				} else {
