@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/binary"
-	"io"
 	"log"
 	"net"
 	"sync"
@@ -51,7 +50,7 @@ func (a *Agent) work() {
 	log.Println("Starting Agent Work For:", a.Addr)
 	defer func() {
 		if err := recover(); err != nil {
-			a.worker.err(err.(error), a)
+			a.worker.err(err.(error))
 		}
 	}()
 
@@ -62,36 +61,21 @@ func (a *Agent) work() {
 	for {
 		if !a.worker.isShuttingDown() {
 			if data, err = a.read(); err != nil {
-				log.Println("got read error:", a.Addr)
 				if opErr, ok := err.(*net.OpError); ok {
 					if opErr.Temporary() {
 						log.Println("opErr.Temporary():", a.Addr)
 						continue
 					} else {
-						a.disconnect_error(err)
+						log.Println("got permanent network error with server:", a.Addr, "comm thread exiting.")
+						a.reconnect_error(err)
 						// else - we're probably dc'ing due to a Close()
-						log.Println("disconnect_error:", a.Addr)
 						break
 					}
-
-				} else if err == io.EOF {
-					a.disconnect_error(err)
-					log.Println("got EOF: disconnect_error:", a.Addr, "Work thread exiting...")
+				} else {
+					log.Println("got error", err, "with server:", a.Addr, "comm thread exiting...")
+					a.reconnect_error(err)
 					break
 				}
-				a.worker.err(err, a)
-				// If it is unexpected error and the connection wasn't
-				// closed by Gearmand, the Agent should close the conection
-				// and reconnect to job server.
-				log.Println("Agent reconnecting to server:", a.Addr)
-				a.Close()
-				a.conn, err = net.Dial(a.net, a.Addr)
-				if err != nil {
-					a.worker.err(err, a)
-					break
-				}
-				a.rw = bufio.NewReadWriter(bufio.NewReader(a.conn),
-					bufio.NewWriter(a.conn))
 			}
 			if len(leftdata) > 0 { // some data left for processing
 				data = append(leftdata, data...)
@@ -102,7 +86,7 @@ func (a *Agent) work() {
 			}
 			for {
 				if inpack, l, err = decodeInPack(data); err != nil {
-					a.worker.err(err, a) // when supplying the agent ref we are allowing to recycle the connection to this gearman server
+					a.worker.err(err) // when supplying the agent ref we are allowing to recycle the connection to this gearman server
 					leftdata = data
 					break
 				} else {
@@ -121,13 +105,13 @@ func (a *Agent) work() {
 	}
 }
 
-func (a *Agent) disconnect_error(err error) {
+func (a *Agent) reconnect_error(err error) {
 	if a.conn != nil {
 		err = &WorkerDisconnectError{
 			err:   err,
-			agent: a,
+			Agent: a,
 		}
-		a.worker.err(err, a)
+		a.worker.err(err)
 	}
 }
 
@@ -163,18 +147,21 @@ func (a *Agent) PreSleep() {
 func (a *Agent) Reconnect() error {
 	a.Lock()
 	defer a.Unlock()
-	for num_tries := 0; ; num_tries++ {
+	if a.conn != nil {
+		a.conn.Close()
+		a.conn = nil
+	}
+	log.Println("Trying to reconnect to server:", a.Addr, "...")
+	for num_tries := 1; !a.worker.isShuttingDown(); num_tries++ {
 		conn, err := net.Dial(a.net, a.Addr)
 		if err != nil {
-			log.Println("Could not redial:", a.Addr, "try#", num_tries)
-			if num_tries >= 10 {
-				return err
-			} else {
-				time.Sleep(500 * time.Millisecond)
-				continue
+			if num_tries%100 == 0 {
+				log.Println("Attempt#", num_tries, "Still trying to reconnect to ", a.Addr)
 			}
+			time.Sleep(500 * time.Millisecond)
+			continue
 		}
-		log.Println("Successfully redialed:", a.Addr, "try#", num_tries)
+		log.Println("Successfully reconnected to:", a.Addr, "attempt#", num_tries)
 		a.conn = conn
 		a.rw = bufio.NewReadWriter(bufio.NewReader(a.conn),
 			bufio.NewWriter(a.conn))
