@@ -5,37 +5,39 @@ import (
 	"bytes"
 	"encoding/binary"
 	"io"
+	"log"
 	"net"
 	"sync"
+	"time"
 
 	rt "github.com/quantcast/g2/pkg/runtime"
 )
 
-// The agent of job server.
-type agent struct {
+// The Agent of job server.
+type Agent struct {
 	sync.Mutex
 	conn      net.Conn
 	rw        *bufio.ReadWriter
 	worker    *Worker
 	in        chan []byte
-	net, addr string
+	net, Addr string
 }
 
-// Create the agent of job server.
-func newAgent(net, addr string, worker *Worker) (a *agent, err error) {
-	a = &agent{
+// Create the Agent of job server.
+func newAgent(net, addr string, worker *Worker) (a *Agent, err error) {
+	a = &Agent{
 		net:    net,
-		addr:   addr,
+		Addr:   addr,
 		worker: worker,
 		in:     make(chan []byte, rt.QueueSize),
 	}
 	return
 }
 
-func (a *agent) Connect() (err error) {
+func (a *Agent) Connect() (err error) {
 	a.Lock()
 	defer a.Unlock()
-	a.conn, err = net.Dial(a.net, a.addr)
+	a.conn, err = net.Dial(a.net, a.Addr)
 	if err != nil {
 		return
 	}
@@ -45,10 +47,11 @@ func (a *agent) Connect() (err error) {
 	return
 }
 
-func (a *agent) work() {
+func (a *Agent) work() {
+	log.Println("Starting Agent Work For:", a.Addr)
 	defer func() {
 		if err := recover(); err != nil {
-			a.worker.err(err.(error))
+			a.worker.err(err.(error), a)
 		}
 	}()
 
@@ -59,28 +62,32 @@ func (a *agent) work() {
 	for {
 		if !a.worker.isShuttingDown() {
 			if data, err = a.read(); err != nil {
+				log.Println("got read error:", a.Addr)
 				if opErr, ok := err.(*net.OpError); ok {
 					if opErr.Temporary() {
+						log.Println("opErr.Temporary():", a.Addr)
 						continue
 					} else {
 						a.disconnect_error(err)
 						// else - we're probably dc'ing due to a Close()
-
+						log.Println("disconnect_error:", a.Addr)
 						break
 					}
 
 				} else if err == io.EOF {
 					a.disconnect_error(err)
+					log.Println("got EOF: disconnect_error:", a.Addr, "Work thread exiting...")
 					break
 				}
-				a.worker.err(err)
+				a.worker.err(err, a)
 				// If it is unexpected error and the connection wasn't
-				// closed by Gearmand, the agent should close the conection
+				// closed by Gearmand, the Agent should close the conection
 				// and reconnect to job server.
+				log.Println("Agent reconnecting to server:", a.Addr)
 				a.Close()
-				a.conn, err = net.Dial(a.net, a.addr)
+				a.conn, err = net.Dial(a.net, a.Addr)
 				if err != nil {
-					a.worker.err(err)
+					a.worker.err(err, a)
 					break
 				}
 				a.rw = bufio.NewReadWriter(bufio.NewReader(a.conn),
@@ -95,7 +102,7 @@ func (a *agent) work() {
 			}
 			for {
 				if inpack, l, err = decodeInPack(data); err != nil {
-					a.worker.err(err)
+					a.worker.err(err, a) // when supplying the agent ref we are allowing to recycle the connection to this gearman server
 					leftdata = data
 					break
 				} else {
@@ -114,17 +121,17 @@ func (a *agent) work() {
 	}
 }
 
-func (a *agent) disconnect_error(err error) {
+func (a *Agent) disconnect_error(err error) {
 	if a.conn != nil {
 		err = &WorkerDisconnectError{
 			err:   err,
 			agent: a,
 		}
-		a.worker.err(err)
+		a.worker.err(err, a)
 	}
 }
 
-func (a *agent) Close() {
+func (a *Agent) Close() {
 	a.Lock()
 	defer a.Unlock()
 	if a.conn != nil {
@@ -133,19 +140,19 @@ func (a *agent) Close() {
 	}
 }
 
-func (a *agent) Grab() {
+func (a *Agent) Grab() {
 	a.Lock()
 	defer a.Unlock()
 	a.grab()
 }
 
-func (a *agent) grab() {
+func (a *Agent) grab() {
 	outpack := getOutPack()
 	outpack.dataType = rt.PT_GrabJobUniq
 	a.write(outpack)
 }
 
-func (a *agent) PreSleep() {
+func (a *Agent) PreSleep() {
 	a.Lock()
 	defer a.Unlock()
 	outpack := getOutPack()
@@ -153,26 +160,37 @@ func (a *agent) PreSleep() {
 	a.write(outpack)
 }
 
-func (a *agent) reconnect() error {
+func (a *Agent) Reconnect() error {
 	a.Lock()
 	defer a.Unlock()
-	conn, err := net.Dial(a.net, a.addr)
-	if err != nil {
-		return err
+	for num_tries := 0; ; num_tries++ {
+		conn, err := net.Dial(a.net, a.Addr)
+		if err != nil {
+			log.Println("Could not redial:", a.Addr, "try#", num_tries)
+			if num_tries >= 10 {
+				return err
+			} else {
+				time.Sleep(500 * time.Millisecond)
+				continue
+			}
+		}
+		log.Println("Successfully redialed:", a.Addr, "try#", num_tries)
+		a.conn = conn
+		a.rw = bufio.NewReadWriter(bufio.NewReader(a.conn),
+			bufio.NewWriter(a.conn))
+
+		a.worker.reRegisterFuncsForAgent(a)
+		a.grab()
+
+		go a.work()
+		break
 	}
-	a.conn = conn
-	a.rw = bufio.NewReadWriter(bufio.NewReader(a.conn),
-		bufio.NewWriter(a.conn))
 
-	a.worker.reRegisterFuncsForAgent(a)
-	a.grab()
-
-	go a.work()
 	return nil
 }
 
 // read length bytes from the socket
-func (a *agent) read() (data []byte, err error) {
+func (a *Agent) read() (data []byte, err error) {
 	n := 0
 
 	tmp := rt.NewBuffer(rt.BufferSize)
@@ -200,7 +218,7 @@ func (a *agent) read() (data []byte, err error) {
 }
 
 // Internal write the encoded job.
-func (a *agent) write(outpack *outPack) (err error) {
+func (a *Agent) write(outpack *outPack) (err error) {
 	var n int
 	buf := outpack.Encode()
 	for i := 0; i < len(buf); i += n {
@@ -213,7 +231,7 @@ func (a *agent) write(outpack *outPack) (err error) {
 }
 
 // Write with lock
-func (a *agent) Write(outpack *outPack) (err error) {
+func (a *Agent) Write(outpack *outPack) (err error) {
 	a.Lock()
 	defer a.Unlock()
 	return a.write(outpack)

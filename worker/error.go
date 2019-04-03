@@ -25,4 +25,4 @@ func getError(data []byte) (err error) {
 }
 
 // An error handler
-type ErrorHandler func(error)
+type ErrorHandler func(error, *Agent)

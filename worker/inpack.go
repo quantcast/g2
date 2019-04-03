@@ -14,7 +14,7 @@ type inPack struct {
 	dataType             rt.PT
 	data                 []byte
 	handle, uniqueId, fn string
-	a                    *agent
+	a                    *Agent
 }
 
 // Create a new job

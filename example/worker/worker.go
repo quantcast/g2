@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/quantcast/g2/worker"
 	"github.com/mikespook/golib/signal"
+	"github.com/quantcast/g2/worker"
 )
 
 func ToUpper(job worker.Job) ([]byte, error) {
@@ -39,8 +39,15 @@ func main() {
 	defer log.Println("Shutdown complete!")
 	w := worker.New(worker.Unlimited)
 	defer w.Close()
-	w.ErrorHandler = func(e error) {
-		log.Println(e)
+	w.ErrorHandler = func(e error, a *worker.Agent) {
+		if a != nil {
+			log.Println("Worker Error:", e, "With Agent:", a.Addr, "Reconnecting...")
+			a.Close()
+			a.Reconnect()
+			log.Println("Agent:", a.Addr, "Reconnected")
+		} else {
+			log.Println("Worker Error:", e)
+		}
 		if opErr, ok := e.(*net.OpError); ok {
 			if !opErr.Temporary() {
 				proc, err := os.FindProcess(os.Getpid())

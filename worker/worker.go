@@ -20,7 +20,7 @@ const (
 // It can connect to multi-server and grab jobs.
 type Worker struct {
 	sync.Mutex
-	agents  []*agent
+	agents  []*Agent
 	funcs   jobFuncs
 	in      chan *inPack
 	running bool
@@ -48,7 +48,7 @@ type Worker struct {
 // OneByOne(=1), there will be only one job executed in a time.
 func New(limit int) (worker *Worker) {
 	worker = &Worker{
-		agents: make([]*agent, 0, limit),
+		agents: make([]*Agent, 0, limit),
 		funcs:  make(jobFuncs),
 		in:     make(chan *inPack, rt.QueueSize),
 	}
@@ -59,9 +59,9 @@ func New(limit int) (worker *Worker) {
 }
 
 // inner error handling
-func (worker *Worker) err(e error) {
+func (worker *Worker) err(e error, a *Agent) {
 	if worker.ErrorHandler != nil {
-		worker.ErrorHandler(e)
+		worker.ErrorHandler(e, a)
 	}
 }
 
@@ -69,7 +69,7 @@ func (worker *Worker) err(e error) {
 //
 // addr should be formatted as 'host:port'.
 func (worker *Worker) AddServer(net, addr string) (err error) {
-	// Create a new job server's client as a agent of server
+	// Create a new job server's client as a Agent of server
 	a, err := newAgent(net, addr, worker)
 	if err != nil {
 		return err
@@ -157,7 +157,7 @@ func (worker *Worker) handleInPack(inpack *inPack) {
 	case rt.PT_JobAssign, rt.PT_JobAssignUniq:
 		go func() {
 			if err := worker.exec(inpack); err != nil {
-				worker.err(err)
+				worker.err(err, nil)
 			}
 		}()
 		if worker.limit != nil {
@@ -167,7 +167,7 @@ func (worker *Worker) handleInPack(inpack *inPack) {
 			inpack.a.Grab()
 		}
 	case rt.PT_Error:
-		worker.err(inpack.Err())
+		worker.err(inpack.Err(), nil)
 		fallthrough
 	case rt.PT_EchoRes:
 		fallthrough
@@ -226,7 +226,7 @@ func (worker *Worker) Work() {
 func (worker *Worker) customHandler(inpack *inPack) {
 	if worker.JobHandler != nil {
 		if err := worker.JobHandler(inpack); err != nil {
-			worker.err(err)
+			worker.err(err, nil)
 		}
 	}
 }
@@ -249,7 +249,7 @@ func (worker *Worker) Reconnect() error {
 	defer worker.Unlock()
 	if worker.running == true {
 		for _, a := range worker.agents {
-			if err := a.reconnect(); err != nil {
+			if err := a.Reconnect(); err != nil {
 				return err
 			}
 		}
@@ -336,7 +336,7 @@ func (worker *Worker) exec(inpack *inPack) (err error) {
 	}
 	return
 }
-func (worker *Worker) reRegisterFuncsForAgent(a *agent) {
+func (worker *Worker) reRegisterFuncsForAgent(a *Agent) {
 	worker.Lock()
 	defer worker.Unlock()
 	for funcname, f := range worker.funcs {
@@ -388,7 +388,7 @@ func execTimeout(f JobFunc, job Job, timeout time.Duration) (r *result) {
 // Error type passed when a worker connection disconnects
 type WorkerDisconnectError struct {
 	err   error
-	agent *agent
+	agent *Agent
 }
 
 func (e *WorkerDisconnectError) Error() string {
@@ -397,10 +397,10 @@ func (e *WorkerDisconnectError) Error() string {
 
 // Responds to the error by asking the worker to reconnect
 func (e *WorkerDisconnectError) Reconnect() (err error) {
-	return e.agent.reconnect()
+	return e.agent.Reconnect()
 }
 
 // Which server was this for?
 func (e *WorkerDisconnectError) Server() (net string, addr string) {
-	return e.agent.net, e.agent.addr
+	return e.agent.net, e.agent.Addr
 }
