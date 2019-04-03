@@ -21,7 +21,7 @@ const (
 // It can connect to multi-server and grab jobs.
 type Worker struct {
 	sync.Mutex
-	agents  []*Agent
+	agents  []*agent
 	funcs   jobFuncs
 	in      chan *inPack
 	running bool
@@ -49,7 +49,7 @@ type Worker struct {
 // OneByOne(=1), there will be only one job executed in a time.
 func New(limit int) (worker *Worker) {
 	worker = &Worker{
-		agents: make([]*Agent, 0, limit),
+		agents: make([]*agent, 0, limit),
 		funcs:  make(jobFuncs),
 		in:     make(chan *inPack, rt.QueueSize),
 	}
@@ -70,7 +70,7 @@ func (worker *Worker) err(e error) {
 //
 // addr should be formatted as 'host:port'.
 func (worker *Worker) AddServer(net, addr string) (err error) {
-	// Create a new job server's client as a Agent of server
+	// Create a new job server's client as a agent of server
 	a, err := newAgent(net, addr, worker)
 	if err != nil {
 		return err
@@ -338,7 +338,7 @@ func (worker *Worker) exec(inpack *inPack) (err error) {
 	}
 	return
 }
-func (worker *Worker) reRegisterFuncsForAgent(a *Agent) {
+func (worker *Worker) reRegisterFuncsForAgent(a *agent) {
 	worker.Lock()
 	defer worker.Unlock()
 	for funcname, f := range worker.funcs {
@@ -390,7 +390,7 @@ func execTimeout(f JobFunc, job Job, timeout time.Duration) (r *result) {
 // Error type passed when a worker connection disconnects
 type WorkerDisconnectError struct {
 	err   error
-	Agent *Agent
+	Agent *agent
 }
 
 func (e *WorkerDisconnectError) Error() string {

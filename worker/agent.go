@@ -12,8 +12,8 @@ import (
 	rt "github.com/quantcast/g2/pkg/runtime"
 )
 
-// The Agent of job server.
-type Agent struct {
+// The agent of job server.
+type agent struct {
 	sync.Mutex
 	conn      net.Conn
 	rw        *bufio.ReadWriter
@@ -22,9 +22,9 @@ type Agent struct {
 	net, Addr string
 }
 
-// Create the Agent of job server.
-func newAgent(net, addr string, worker *Worker) (a *Agent, err error) {
-	a = &Agent{
+// Create the agent of job server.
+func newAgent(net, addr string, worker *Worker) (a *agent, err error) {
+	a = &agent{
 		net:    net,
 		Addr:   addr,
 		worker: worker,
@@ -33,7 +33,7 @@ func newAgent(net, addr string, worker *Worker) (a *Agent, err error) {
 	return
 }
 
-func (a *Agent) Connect() (err error) {
+func (a *agent) Connect() (err error) {
 	a.Lock()
 	defer a.Unlock()
 	a.conn, err = net.Dial(a.net, a.Addr)
@@ -46,8 +46,8 @@ func (a *Agent) Connect() (err error) {
 	return
 }
 
-func (a *Agent) work() {
-	log.Println("Starting Agent Work For:", a.Addr)
+func (a *agent) work() {
+	log.Println("Starting agent Work For:", a.Addr)
 	defer func() {
 		if err := recover(); err != nil {
 			a.worker.err(err.(error))
@@ -105,7 +105,7 @@ func (a *Agent) work() {
 	}
 }
 
-func (a *Agent) reconnect_error(err error) {
+func (a *agent) reconnect_error(err error) {
 	if a.conn != nil {
 		err = &WorkerDisconnectError{
 			err:   err,
@@ -115,7 +115,7 @@ func (a *Agent) reconnect_error(err error) {
 	}
 }
 
-func (a *Agent) Close() {
+func (a *agent) Close() {
 	a.Lock()
 	defer a.Unlock()
 	if a.conn != nil {
@@ -124,19 +124,19 @@ func (a *Agent) Close() {
 	}
 }
 
-func (a *Agent) Grab() {
+func (a *agent) Grab() {
 	a.Lock()
 	defer a.Unlock()
 	a.grab()
 }
 
-func (a *Agent) grab() {
+func (a *agent) grab() {
 	outpack := getOutPack()
 	outpack.dataType = rt.PT_GrabJobUniq
 	a.write(outpack)
 }
 
-func (a *Agent) PreSleep() {
+func (a *agent) PreSleep() {
 	a.Lock()
 	defer a.Unlock()
 	outpack := getOutPack()
@@ -144,7 +144,7 @@ func (a *Agent) PreSleep() {
 	a.write(outpack)
 }
 
-func (a *Agent) Reconnect() error {
+func (a *agent) Reconnect() error {
 	a.Lock()
 	defer a.Unlock()
 	if a.conn != nil {
@@ -177,7 +177,7 @@ func (a *Agent) Reconnect() error {
 }
 
 // read length bytes from the socket
-func (a *Agent) read() (data []byte, err error) {
+func (a *agent) read() (data []byte, err error) {
 	n := 0
 
 	tmp := rt.NewBuffer(rt.BufferSize)
@@ -205,7 +205,7 @@ func (a *Agent) read() (data []byte, err error) {
 }
 
 // Internal write the encoded job.
-func (a *Agent) write(outpack *outPack) (err error) {
+func (a *agent) write(outpack *outPack) (err error) {
 	var n int
 	buf := outpack.Encode()
 	for i := 0; i < len(buf); i += n {
@@ -218,7 +218,7 @@ func (a *Agent) write(outpack *outPack) (err error) {
 }
 
 // Write with lock
-func (a *Agent) Write(outpack *outPack) (err error) {
+func (a *agent) Write(outpack *outPack) (err error) {
 	a.Lock()
 	defer a.Unlock()
 	return a.write(outpack)

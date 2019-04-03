@@ -242,7 +242,7 @@ func initWorker(t *testing.T) *Worker {
 }
 
 // submitEmptyInPack sends an empty inpack with the specified fn name to the worker. It uses
-// the first Agent of the worker.
+// the first agent of the worker.
 func submitEmptyInPack(t *testing.T, worker *Worker, function string) {
 	if l := len(worker.agents); l != 1 {
 		t.Error("The worker has no agents")
