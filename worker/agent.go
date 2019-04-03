@@ -19,14 +19,14 @@ type agent struct {
 	rw        *bufio.ReadWriter
 	worker    *Worker
 	in        chan []byte
-	net, Addr string
+	net, addr string
 }
 
 // Create the agent of job server.
 func newAgent(net, addr string, worker *Worker) (a *agent, err error) {
 	a = &agent{
 		net:    net,
-		Addr:   addr,
+		addr:   addr,
 		worker: worker,
 		in:     make(chan []byte, rt.QueueSize),
 	}
@@ -36,7 +36,7 @@ func newAgent(net, addr string, worker *Worker) (a *agent, err error) {
 func (a *agent) Connect() (err error) {
 	a.Lock()
 	defer a.Unlock()
-	a.conn, err = net.Dial(a.net, a.Addr)
+	a.conn, err = net.Dial(a.net, a.addr)
 	if err != nil {
 		return
 	}
@@ -47,7 +47,7 @@ func (a *agent) Connect() (err error) {
 }
 
 func (a *agent) work() {
-	log.Println("Starting agent Work For:", a.Addr)
+	log.Println("Starting agent Work For:", a.addr)
 	defer func() {
 		if err := recover(); err != nil {
 			a.worker.err(err.(error))
@@ -63,16 +63,16 @@ func (a *agent) work() {
 			if data, err = a.read(); err != nil {
 				if opErr, ok := err.(*net.OpError); ok {
 					if opErr.Temporary() {
-						log.Println("opErr.Temporary():", a.Addr)
+						log.Println("opErr.Temporary():", a.addr)
 						continue
 					} else {
-						log.Println("got permanent network error with server:", a.Addr, "comm thread exiting.")
+						log.Println("got permanent network error with server:", a.addr, "comm thread exiting.")
 						a.reconnect_error(err)
 						// else - we're probably dc'ing due to a Close()
 						break
 					}
 				} else {
-					log.Println("got error", err, "with server:", a.Addr, "comm thread exiting...")
+					log.Println("got error", err, "with server:", a.addr, "comm thread exiting...")
 					a.reconnect_error(err)
 					break
 				}
@@ -151,17 +151,17 @@ func (a *agent) Reconnect() error {
 		a.conn.Close()
 		a.conn = nil
 	}
-	log.Println("Trying to reconnect to server:", a.Addr, "...")
+	log.Println("Trying to reconnect to server:", a.addr, "...")
 	for num_tries := 1; !a.worker.isShuttingDown(); num_tries++ {
-		conn, err := net.Dial(a.net, a.Addr)
+		conn, err := net.Dial(a.net, a.addr)
 		if err != nil {
 			if num_tries%100 == 0 {
-				log.Println("Attempt#", num_tries, "Still trying to reconnect to ", a.Addr)
+				log.Println("Attempt#", num_tries, "Still trying to reconnect to ", a.addr)
 			}
 			time.Sleep(500 * time.Millisecond)
 			continue
 		}
-		log.Println("Successfully reconnected to:", a.Addr, "attempt#", num_tries)
+		log.Println("Successfully reconnected to:", a.addr, "attempt#", num_tries)
 		a.conn = conn
 		a.rw = bufio.NewReadWriter(bufio.NewReader(a.conn),
 			bufio.NewWriter(a.conn))

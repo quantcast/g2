@@ -404,5 +404,5 @@ func (e *WorkerDisconnectError) Reconnect() (err error) {
 
 // Which server was this for?
 func (e *WorkerDisconnectError) Server() (net string, addr string) {
-	return e.agent.net, e.agent.Addr
+	return e.agent.net, e.agent.addr
 }
