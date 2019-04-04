@@ -33,19 +33,6 @@ func newAgent(net, addr string, worker *Worker) (a *agent, err error) {
 	return
 }
 
-func (a *agent) Connect() (err error) {
-	a.Lock()
-	defer a.Unlock()
-	a.conn, err = net.Dial(a.net, a.addr)
-	if err != nil {
-		return
-	}
-	a.rw = bufio.NewReadWriter(bufio.NewReader(a.conn),
-		bufio.NewWriter(a.conn))
-	go a.work()
-	return
-}
-
 func (a *agent) work() {
 	log.Println("Starting agent Work For:", a.addr)
 	defer func() {
@@ -119,55 +106,63 @@ func (a *agent) Close() {
 	a.Lock()
 	defer a.Unlock()
 	if a.conn != nil {
-		a.conn.Close()
+		_ = a.conn.Close()
 		a.conn = nil
 	}
 }
 
-func (a *agent) Grab() {
+func (a *agent) Grab() (err error) {
 	a.Lock()
 	defer a.Unlock()
-	a.grab()
+	return a.grab()
 }
 
-func (a *agent) grab() {
+func (a *agent) grab() (err error) {
 	outpack := getOutPack()
 	outpack.dataType = rt.PT_GrabJobUniq
-	a.write(outpack)
+	return a.write(outpack)
 }
 
-func (a *agent) PreSleep() {
+func (a *agent) PreSleep() (err error) {
 	a.Lock()
 	defer a.Unlock()
 	outpack := getOutPack()
 	outpack.dataType = rt.PT_PreSleep
-	a.write(outpack)
+	return a.write(outpack)
 }
 
-func (a *agent) Reconnect() error {
+func (a *agent) Connect() error {
 	a.Lock()
 	defer a.Unlock()
-	if a.conn != nil {
-		a.conn.Close()
-		a.conn = nil
-	}
-	log.Println("Trying to reconnect to server:", a.addr, "...")
+	log.Println("Trying to Connect to server:", a.addr, "...")
 	for num_tries := 1; !a.worker.isShuttingDown(); num_tries++ {
+
+		if a.conn != nil {
+			_ = a.conn.Close()
+			a.conn = nil
+		}
+
 		conn, err := net.Dial(a.net, a.addr)
 		if err != nil {
 			if num_tries%100 == 0 {
-				log.Println("Attempt#", num_tries, "Still trying to reconnect to ", a.addr)
+				log.Println("Attempt#", num_tries, "Still trying to Connect to ", a.addr)
 			}
 			time.Sleep(500 * time.Millisecond)
 			continue
 		}
-		log.Println("Successfully reconnected to:", a.addr, "attempt#", num_tries)
+
+		log.Println("Successfully Connected to:", a.addr, "attempt#", num_tries)
 		a.conn = conn
 		a.rw = bufio.NewReadWriter(bufio.NewReader(a.conn),
 			bufio.NewWriter(a.conn))
 
-		a.worker.reRegisterFuncsForAgent(a)
-		a.grab()
+		if err := a.worker.reRegisterFuncsForAgent(a); err != nil {
+			continue
+		}
+
+		if err := a.grab(); err != nil {
+			continue
+		}
 
 		go a.work()
 		break

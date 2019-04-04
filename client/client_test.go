@@ -6,14 +6,14 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"github.com/appscode/go/log"
+	rt "github.com/quantcast/g2/pkg/runtime"
 	"io"
 	"net"
 	"os"
 	"reflect"
 	"strings"
 	"testing"
-
-	rt "github.com/quantcast/g2/pkg/runtime"
 )
 
 type snapshot struct {
@@ -187,9 +187,18 @@ func drain(observed io.Reader) {
 }
 
 func TestClose(test *testing.T) {
-	client, _ := net.Pipe()
 
-	gearmanc := NewConnected(client)
+	handlerConnOpen := func() (conn net.Conn, err error) {
+		log.Infoln("Creating net.Pipe connection...")
+		conn, _ = net.Pipe()
+		return
+	}
+
+	handlerConnClose := func(conn net.Conn) (err error) {
+		return conn.Close()
+	}
+
+	gearmanc := NewClient(handlerConnClose, handlerConnOpen)
 
 	if gearmanc.Close() != nil {
 		test.Fatalf("expected no error in closing connected client")
@@ -209,9 +218,17 @@ func TestSnapshot(test *testing.T) {
 		test.Fatalf("error loading snapshot: %s\n", err)
 	}
 
+	handlerConnOpen := func() (conn net.Conn, err error) {
+		return client, nil // return pre-created pipe client
+	}
+
+	handlerConnClose := func(conn net.Conn) (err error) {
+		return conn.Close()
+	}
+
 	// This has to be done in another go-routine since all of the reads/writes
 	// are synchronous
-	gearmanClient := NewConnected(client)
+	gearmanClient := NewClient(handlerConnClose, handlerConnOpen)
 
 	if err = snapshot.replay(server, "server", "client"); err != nil {
 		test.Fatalf("error loading snapshot: %s", err)

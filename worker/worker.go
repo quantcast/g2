@@ -5,7 +5,6 @@ package worker
 import (
 	"encoding/binary"
 	"fmt"
-	"log"
 	"sync"
 	"time"
 
@@ -30,9 +29,6 @@ type Worker struct {
 	shuttingDown bool
 	// Used during shutdown to wait for all active jobs to finish
 	activeJobs sync.WaitGroup
-
-	// once protects registering jobs multiple times
-	once sync.Once
 
 	Id           string
 	ErrorHandler ErrorHandler
@@ -187,17 +183,15 @@ func (worker *Worker) Ready() (err error) {
 		return ErrNoneFuncs
 	}
 	for _, a := range worker.agents {
-		if err = a.Connect(); err != nil {
-			return
-		}
+		go a.Connect()
 	}
 
 	// `once` protects registering worker functions multiple times.
-	worker.once.Do(func() {
-		for funcname, f := range worker.funcs {
-			worker.addFunc(funcname, f.timeout)
-		}
-	})
+	//	worker.once.Do(func() {
+	//		for funcname, f := range worker.funcs {
+	//			worker.addFunc(funcname, f.timeout)
+	//		}
+	//	})
 	worker.ready = true
 	return
 }
@@ -214,14 +208,11 @@ func (worker *Worker) Work() {
 	}
 
 	worker.running = true
-	for _, a := range worker.agents {
-		a.Grab()
-	}
+
 	var inpack *inPack
 	for inpack = range worker.in {
 		worker.handleInPack(inpack)
 	}
-	log.Println("Work thread exited...")
 }
 
 // custom handling wrapper
@@ -251,7 +242,7 @@ func (worker *Worker) ReconnectAllAgents() error {
 	defer worker.Unlock()
 	if worker.running == true {
 		for _, a := range worker.agents {
-			if err := a.Reconnect(); err != nil {
+			if err := a.Connect(); err != nil {
 				return err
 			}
 		}
@@ -331,21 +322,26 @@ func (worker *Worker) exec(inpack *inPack) (err error) {
 				outpack.dataType = rt.PT_WorkException
 			}
 			err = r.err
+			if err != nil {
+				return
+			}
 		}
 		outpack.handle = inpack.handle
 		outpack.data = r.data
-		inpack.a.Write(outpack)
+		err = inpack.a.Write(outpack)
 	}
 	return
 }
-func (worker *Worker) reRegisterFuncsForAgent(a *agent) {
+func (worker *Worker) reRegisterFuncsForAgent(a *agent) (err error) {
 	worker.Lock()
 	defer worker.Unlock()
 	for funcname, f := range worker.funcs {
 		outpack := prepFuncOutpack(funcname, f.timeout)
-		a.write(outpack)
+		if err := a.write(outpack); err != nil {
+			return err
+		}
 	}
-
+	return
 }
 
 func (worker *Worker) Shutdown() {
@@ -399,7 +395,7 @@ func (e *WorkerDisconnectError) Error() string {
 
 // Responds to the error by asking the worker to reconnect
 func (e *WorkerDisconnectError) Reconnect() (err error) {
-	return e.agent.Reconnect()
+	return e.agent.Connect()
 }
 
 // Which server was this for?

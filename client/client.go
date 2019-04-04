@@ -34,9 +34,13 @@ type connection struct {
 	net.Conn
 }
 
+type ConnCloseHandler func(conn net.Conn) (err error)
+type ConnOpenHandler func() (conn net.Conn, err error)
+
 // One client connect to one server.
 // Use Pool for multi-connections.
 type Client struct {
+	sync.Mutex
 	net, addr string
 	handlers  sync.Map
 	expected  chan *Response
@@ -49,25 +53,46 @@ type Client struct {
 
 	ResponseTimeout time.Duration
 
-	ErrorHandler ErrorHandler
+	ErrorHandler    ErrorHandler
+	handleConnClose ConnCloseHandler
+	handleConnOpen  ConnOpenHandler
 }
 
 // Return a client.
-func New(network, addr string) (client *Client, err error) {
-	conn, err := net.Dial(network, addr)
+func NewNetClient(network, addr string) (client *Client, err error) {
 
-	if err != nil {
+	handlerConnOpen := func() (conn net.Conn, err error) {
+		log.Infof("Trying to connect to server %v ...", addr)
+		for num_tries := 1; ; num_tries++ {
+			if num_tries%100 == 0 {
+				log.Warningf("Still trying to connect to server %v, attempt# %v ...", addr, num_tries)
+			}
+			conn, err = net.Dial(network, addr)
+			if err != nil {
+				time.Sleep(500 * time.Millisecond)
+				continue
+			}
+			log.Infof("Connected to server %v on attempt# %v", addr, num_tries)
+			break
+		}
 		return
 	}
 
-	client = NewConnected(conn)
+	client = NewClient(nil, handlerConnOpen)
 
 	return
 }
 
-// Return a new client from an established connection. Largely used for
-// testing, though other use-cases can be imagined.
-func NewConnected(conn net.Conn) (client *Client) {
+/// handler_conn_close: optional
+func NewClient(handler_conn_close ConnCloseHandler,
+	handler_conn_open ConnOpenHandler) (client *Client) {
+
+	conn, err := handler_conn_open()
+	if err != nil {
+		log.Errorf("Failed to create new client, error: %v", err)
+		return nil
+	}
+
 	addr := conn.RemoteAddr()
 
 	client = &Client{
@@ -79,12 +104,20 @@ func NewConnected(conn net.Conn) (client *Client) {
 		ResponseTimeout: DefaultTimeout,
 		responsePool:    &sync.Pool{New: func() interface{} { return &Response{} }},
 		requestPool:     &sync.Pool{New: func() interface{} { return &request{} }},
+		handleConnClose: handler_conn_close,
+		handleConnOpen:  handler_conn_open,
 	}
 
 	go client.readLoop()
 	go client.writeLoop()
 
 	return
+}
+
+func (client *Client) getConn() *connection {
+	client.Lock()
+	defer client.Unlock()
+	return client.conn
 }
 
 func (client *Client) writeLoop() {
@@ -96,13 +129,20 @@ func (client *Client) writeLoop() {
 	// goroutines to all write as quickly as possible, uses a channel and the
 	// writeLoop lives in a separate goroutine.
 	for req := range client.outbound {
-		client.conn.Write([]byte(rt.ReqStr))
 
-		// todo handle errors.
+		if _, err := client.getConn().Write([]byte(rt.ReqStr)); err != nil {
+			if err = client.reconnect(err); err != nil {
+				break
+			}
+		}
 
 		binary.BigEndian.PutUint32(ibuf, req.pt.Uint32())
 
-		client.conn.Write(ibuf)
+		if _, err := client.getConn().Write(ibuf); err != nil {
+			if err = client.reconnect(err); err != nil {
+				break
+			}
+		}
 
 		length = 0
 
@@ -115,13 +155,29 @@ func (client *Client) writeLoop() {
 
 		binary.BigEndian.PutUint32(ibuf, length)
 
-		client.conn.Write(ibuf)
+		if _, err := client.getConn().Write(ibuf); err != nil {
+			if err = client.reconnect(err); err != nil {
+				break
+			}
+		}
 
-		client.conn.Write(req.data[0])
+		if _, err := client.getConn().Write(req.data[0]); err != nil {
+			if err = client.reconnect(err); err != nil {
+				break
+			}
+		}
 
 		for i = 1; i < len(req.data); i++ {
-			client.conn.Write(NullBytes)
-			client.conn.Write(req.data[i])
+			if _, err := client.getConn().Write(NullBytes); err != nil {
+				if err = client.reconnect(err); err != nil {
+					break
+				}
+			}
+			if _, err := client.getConn().Write(req.data[i]); err != nil {
+				if err = client.reconnect(err); err != nil {
+					break
+				}
+			}
 		}
 
 		client.requestPool.Put(req)
@@ -137,47 +193,33 @@ func decodeHeader(header []byte) (code []byte, pt uint32, length int) {
 }
 
 func (client *Client) reconnect(err error) error {
-	if client.conn != nil {
-		return nil
-	}
 
-	// TODO I doubt this error handling is right because it looks
-	// really complicated.
+	// not actioning on error if it's deemed Temporary
+	// we might want to take note of timestamp and eventually recycle this connection
+	// if it persists too long (even though classified as Temporary here)
 	if opErr, ok := err.(*net.OpError); ok {
-		if opErr.Timeout() {
-			client.err(err)
-		}
 		if opErr.Temporary() {
 			return nil
 		}
-
-		return err
-	}
-
-	if err != nil {
-		client.err(err)
 	}
 
 	// If it is unexpected error and the connection wasn't
 	// closed by Gearmand, the client should close the conection
 	// and reconnect to job server.
-	client.Close()
+	log.Warningf("Closing connection to %v due to error %v, will reconnect...", client.addr, err)
 
-	conn, err := net.Dial(client.net, client.addr)
+	client.Lock()
+	if close_err := client.Close(); close_err != nil {
+		log.Warningf("Non-fatal error %v, while closing connection to %v", close_err, client.addr)
+	}
 
+	conn, err := client.handleConnOpen()
 	if err != nil {
-		client.err(err)
 		return err
 	}
 
-	swapped := atomic.CompareAndSwapPointer(
-		(*unsafe.Pointer)(unsafe.Pointer(&client.conn)),
-		unsafe.Pointer(nil),
-		unsafe.Pointer(&connection{conn}))
-
-	if !swapped {
-		conn.Close()
-	}
+	client.conn = &connection{conn}
+	client.Unlock()
 
 	return nil
 }
@@ -189,7 +231,7 @@ func (client *Client) readLoop() {
 	var resp *Response
 
 	for client.conn != nil {
-		if _, err = io.ReadFull(client.conn, header); err != nil {
+		if _, err = io.ReadFull(client.getConn(), header); err != nil {
 			if err = client.reconnect(err); err != nil {
 				break
 			}
@@ -201,7 +243,7 @@ func (client *Client) readLoop() {
 
 		contents := make([]byte, length)
 
-		if _, err = io.ReadFull(client.conn, contents); err != nil {
+		if _, err = io.ReadFull(client.getConn(), contents); err != nil {
 			if err = client.reconnect(err); err != nil {
 				break
 			}
@@ -393,9 +435,6 @@ func (client *Client) DoAt(funcname string, epoch int64, funcParam []byte) (hand
 
 // Get job status from job server.
 func (client *Client) Status(handle string) (status *Status, err error) {
-	if err = client.reconnect(nil); err != nil {
-		return
-	}
 
 	client.outbound <- client.request().status(handle)
 
@@ -404,15 +443,11 @@ func (client *Client) Status(handle string) (status *Status, err error) {
 	status, err = res.Status()
 
 	client.responsePool.Put(res)
-
-	return
+	return status, nil
 }
 
 // Echo.
 func (client *Client) Echo(data []byte) (echo []byte, err error) {
-	if err = client.reconnect(nil); err != nil {
-		return
-	}
 
 	client.outbound <- client.request().echo(data)
 
@@ -432,8 +467,11 @@ func (client *Client) Close() (err error) {
 	conn := (*connection)(ptr)
 
 	if conn != nil {
-		err = conn.Close()
-
+		if client.handleConnClose != nil {
+			err = client.handleConnClose(conn)
+		} else {
+			err = conn.Close()
+		}
 		return
 	}
 

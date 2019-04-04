@@ -4,7 +4,9 @@ require (
 	github.com/appscode/go v0.0.0-20180628092646-df3c57fca2be
 	github.com/appscode/pat v0.0.0-20170521084856-48ff78925b79
 	github.com/beorn7/perks v0.0.0-20160229213445-3ac7bf7a47d1 // indirect
+	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/golang/glog v0.0.0-20141105023935-44145f04b68c // indirect
+	github.com/golang/protobuf v1.3.1 // indirect
 	github.com/golang/snappy v0.0.0-20160529050041-d9eb7a3d35ec // indirect
 	github.com/google/uuid v0.0.0-20171113160352-8c31c18f31ed // indirect
 	github.com/inconshreveable/mousetrap v1.0.0 // indirect

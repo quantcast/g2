@@ -64,7 +64,7 @@ func main() {
 		log.Printf("Data=%s\n", job.Data())
 		return nil
 	}
-	w.AddServer("tcp4", "gearmanserver:4730")
+	w.AddServer("tcp4", "127.0.0.1:4730")
 	w.AddFunc("Foobar", Foobar, worker.Unlimited)
 	w.AddFunc("ToUpper", ToUpper, worker.Unlimited)
 	w.AddFunc("ToUpperTimeOut5", ToUpperDelay10, 5)
