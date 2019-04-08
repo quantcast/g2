@@ -4,9 +4,11 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/binary"
+	"github.com/felixge/tcpkeepalive"
 	"io"
 	"net"
 	"sync"
+	"time"
 
 	rt "github.com/quantcast/g2/pkg/runtime"
 )
@@ -41,6 +43,11 @@ func (a *agent) Connect() (err error) {
 	}
 	a.rw = bufio.NewReadWriter(bufio.NewReader(a.conn),
 		bufio.NewWriter(a.conn))
+
+	kaConn, _ := tcpkeepalive.EnableKeepAlive(a.conn)
+	kaConn.SetKeepAliveIdle(30*time.Second)
+	kaConn.SetKeepAliveCount(4)
+	kaConn.SetKeepAliveInterval(5*time.Second)
 	go a.work()
 	return
 }
