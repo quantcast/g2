@@ -220,10 +220,6 @@ func (client *Client) reconnect(err error) error {
 		}
 	}
 
-	// If it is unexpected error and the connection wasn't
-	// closed by Gearmand, the client should close the conection
-	// and reconnect to job server.
-
 	ownReconnect := client.grabReconnectState()
 
 	client.Lock()
