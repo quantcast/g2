@@ -41,11 +41,13 @@ type ConnOpenHandler func() (conn net.Conn, err error)
 // Use Pool for multi-connections.
 type Client struct {
 	sync.Mutex
-	net, addr string
-	handlers  sync.Map
-	expected  chan *Response
-	outbound  chan *request
-	conn      *connection
+	reconnectLock      sync.Mutex
+	reconnectingActive bool
+	net, addr          string
+	handlers           sync.Map
+	expected           chan *Response
+	outbound           chan *request
+	conn               *connection
 	//rw        *bufio.ReadWriter
 
 	responsePool *sync.Pool
@@ -192,6 +194,21 @@ func decodeHeader(header []byte) (code []byte, pt uint32, length int) {
 	return
 }
 
+func (client *Client) grabReconnectState() (success bool) {
+	client.reconnectLock.Lock()
+	defer client.reconnectLock.Unlock()
+	if client.reconnectingActive { // another thread is already reconnecting to server, this thread will exit
+		return false
+	}
+	client.reconnectingActive = true // I am first to attempt reconnection
+	return true
+}
+
+// called by owner of reconnect state to tell that it has finished reconnecting
+func (client *Client) resetReconnectState() {
+	client.reconnectingActive = false
+}
+
 func (client *Client) reconnect(err error) error {
 
 	// not actioning on error if it's deemed Temporary
@@ -206,9 +223,20 @@ func (client *Client) reconnect(err error) error {
 	// If it is unexpected error and the connection wasn't
 	// closed by Gearmand, the client should close the conection
 	// and reconnect to job server.
-	log.Warningf("Closing connection to %v due to error %v, will reconnect...", client.addr, err)
+
+	ownReconnect := client.grabReconnectState()
 
 	client.Lock()
+	defer client.Unlock()
+
+	if !ownReconnect {
+		log.Warningf("Reconnect collision, this thread waits for other to complete reconnection")
+		return nil
+	}
+
+	defer client.resetReconnectState() // before releasing client lock we will reset reconnection state
+
+	log.Warningf("Closing connection to %v due to error %v, will reconnect...", client.addr, err)
 	if close_err := client.Close(); close_err != nil {
 		log.Warningf("Non-fatal error %v, while closing connection to %v", close_err, client.addr)
 	}
@@ -219,7 +247,6 @@ func (client *Client) reconnect(err error) error {
 	}
 
 	client.conn = &connection{conn}
-	client.Unlock()
 
 	return nil
 }
