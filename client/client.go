@@ -86,10 +86,10 @@ func NewNetClient(network, addr string) (client *Client, err error) {
 }
 
 /// handler_conn_close: optional
-func NewClient(handler_conn_close ConnCloseHandler,
-	handler_conn_open ConnOpenHandler) (client *Client) {
+func NewClient(handleConnClose ConnCloseHandler,
+	handleConnOpen ConnOpenHandler) (client *Client) {
 
-	conn, err := handler_conn_open()
+	conn, err := handleConnOpen()
 	if err != nil {
 		log.Errorf("Failed to create new client, error: %v", err)
 		return nil
@@ -106,8 +106,8 @@ func NewClient(handler_conn_close ConnCloseHandler,
 		ResponseTimeout: DefaultTimeout,
 		responsePool:    &sync.Pool{New: func() interface{} { return &Response{} }},
 		requestPool:     &sync.Pool{New: func() interface{} { return &request{} }},
-		handleConnClose: handler_conn_close,
-		handleConnOpen:  handler_conn_open,
+		handleConnClose: handleConnClose,
+		handleConnOpen:  handleConnOpen,
 	}
 
 	go client.readLoop()
