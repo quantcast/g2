@@ -37,7 +37,7 @@ func (a *agent) work() {
 	log.Println("Starting agent Work For:", a.addr)
 	defer func() {
 		if err := recover(); err != nil {
-			a.worker.err(err.(error))
+			a.reconnect_error(err.(error))
 		}
 	}()
 
@@ -73,8 +73,7 @@ func (a *agent) work() {
 			}
 			for {
 				if inpack, l, err = decodeInPack(data); err != nil {
-					a.worker.err(err)
-					leftdata = data
+					a.reconnect_error(err)
 					break
 				} else {
 					leftdata = nil

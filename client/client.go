@@ -32,6 +32,12 @@ type connection struct {
 	// of `atomic.SwapPointer` and `atomic.CompareAndSwapPointer` much more
 	// convenient.
 	net.Conn
+	connVersion int
+}
+
+type chanStruct struct {
+	outbound chan *request
+	expected chan *Response
 }
 
 type ConnCloseHandler func(conn net.Conn) (err error)
@@ -45,10 +51,9 @@ type Client struct {
 	reconnectingActive bool
 	net, addr          string
 	handlers           sync.Map
-	expected           chan *Response
-	outbound           chan *request
 	conn               *connection
 	//rw        *bufio.ReadWriter
+	channels *chanStruct
 
 	responsePool *sync.Pool
 	requestPool  *sync.Pool
@@ -65,18 +70,33 @@ func NewNetClient(network, addr string) (client *Client, err error) {
 
 	handlerConnOpen := func() (conn net.Conn, err error) {
 		log.Infof("Trying to connect to server %v ...", addr)
-		for num_tries := 1; ; num_tries++ {
-			if num_tries%100 == 0 {
-				log.Warningf("Still trying to connect to server %v, attempt# %v ...", addr, num_tries)
+		for {
+			for num_tries := 1; ; num_tries++ {
+				if num_tries%100 == 0 {
+					log.Warningf("Still trying to connect to server %v, attempt# %v ...", addr, num_tries)
+				}
+				conn, err = net.Dial(network, addr)
+				if err != nil {
+					time.Sleep(time.Second)
+					continue
+				}
+				break
 			}
+			// at this point the server is back online, we will disconnect and reconnect again to make sure that we don't have
+			// one of those dud connections which could happen if we've reconnected to gearman too quickly after it started
+			_ = conn.Close()
+			time.Sleep(3 * time.Second)
+
 			conn, err = net.Dial(network, addr)
 			if err != nil {
-				time.Sleep(500 * time.Millisecond)
+				// looks like there is another problem, go back to the main loop
+				time.Sleep(time.Second)
 				continue
 			}
-			log.Infof("Connected to server %v on attempt# %v", addr, num_tries)
 			break
 		}
+		log.Infof("Connected to server %v", addr)
+
 		return
 	}
 
@@ -100,9 +120,8 @@ func NewClient(handleConnClose ConnCloseHandler,
 	client = &Client{
 		net:             addr.Network(),
 		addr:            addr.String(),
-		conn:            &connection{conn},
-		outbound:        make(chan *request),
-		expected:        make(chan *Response),
+		conn:            &connection{Conn: conn},
+		channels:        &chanStruct{expected: make(chan *Response), outbound: make(chan *request)},
 		ResponseTimeout: DefaultTimeout,
 		responsePool:    &sync.Pool{New: func() interface{} { return &Response{} }},
 		requestPool:     &sync.Pool{New: func() interface{} { return &request{} }},
@@ -114,6 +133,10 @@ func NewClient(handleConnClose ConnCloseHandler,
 	go client.writeLoop()
 
 	return
+}
+
+func (client *Client) IsConnectionSet() bool {
+	return client.conn != nil
 }
 
 func (client *Client) getConn() *connection {
@@ -130,7 +153,7 @@ func (client *Client) writeLoop() {
 	// Pipeline requests; but only write them one at a time. To allow multiple
 	// goroutines to all write as quickly as possible, uses a channel and the
 	// writeLoop lives in a separate goroutine.
-	for req := range client.outbound {
+	for req := range client.channels.outbound {
 
 		if _, err := client.getConn().Write([]byte(rt.ReqStr)); err != nil {
 			if err = client.reconnect(err); err != nil {
@@ -175,6 +198,7 @@ func (client *Client) writeLoop() {
 					break
 				}
 			}
+
 			if _, err := client.getConn().Write(req.data[i]); err != nil {
 				if err = client.reconnect(err); err != nil {
 					break
@@ -226,11 +250,15 @@ func (client *Client) reconnect(err error) error {
 	defer client.Unlock()
 
 	if !ownReconnect {
-		log.Warningf("Reconnect collision, this thread waits for other to complete reconnection")
+		//Reconnect collision, this thread will exit and wait on next client.Lock() for other to complete reconnection
 		return nil
 	}
 
 	defer client.resetReconnectState() // before releasing client lock we will reset reconnection state
+
+	connVersion := client.conn.connVersion
+	close(client.channels.expected)
+	close(client.channels.outbound)
 
 	log.Warningf("Closing connection to %v due to error %v, will reconnect...", client.addr, err)
 	if close_err := client.Close(); close_err != nil {
@@ -242,7 +270,21 @@ func (client *Client) reconnect(err error) error {
 		return err
 	}
 
-	client.conn = &connection{conn}
+	newConn := &connection{conn, connVersion + 1}
+
+	if swapped := atomic.CompareAndSwapPointer(
+		(*unsafe.Pointer)(unsafe.Pointer(&client.conn)),
+		unsafe.Pointer(nil), unsafe.Pointer(newConn)); !swapped {
+		return errors.New("Was expecting nil when replacing with new connection")
+	}
+
+	_ = atomic.SwapPointer((*unsafe.Pointer)(unsafe.Pointer(&client.channels)),
+		unsafe.Pointer(&chanStruct{
+			expected: make(chan *Response),
+			outbound: make(chan *request)}))
+
+	// writeLoop() will be dead because the channel has been closed, it can be restarted now
+	go client.writeLoop()
 
 	return nil
 }
@@ -254,6 +296,7 @@ func (client *Client) readLoop() {
 	var resp *Response
 
 	for client.conn != nil {
+
 		if _, err = io.ReadFull(client.getConn(), header); err != nil {
 			if err = client.reconnect(err); err != nil {
 				break
@@ -313,7 +356,7 @@ func (client *Client) readLoop() {
 }
 
 func (client *Client) process(resp *Response) {
-	// NOTE Any waiting goroutine which reads from `expected` should return the
+	// NOTE Any waiting goroutine which reads from `channels` should return the
 	// response object to the pool; but the conditions which handle it
 	// terminally should return it here.
 	switch resp.DataType {
@@ -322,10 +365,10 @@ func (client *Client) process(resp *Response) {
 
 		client.err(getError(resp.Data))
 
-		client.expected <- resp
+		client.channels.expected <- resp
 
 	case rt.PT_StatusRes, rt.PT_JobCreated, rt.PT_EchoRes:
-		client.expected <- resp
+		client.channels.expected <- resp
 	case rt.PT_WorkComplete, rt.PT_WorkFail, rt.PT_WorkException:
 		defer client.handlers.Delete(resp.Handle)
 		fallthrough
@@ -337,7 +380,7 @@ func (client *Client) process(resp *Response) {
 				h(resp)
 			}
 		} else {
-			client.err(fmt.Errorf("unexpected %s response for \"%s\" with no handler", resp.DataType, resp.Handle))
+			log.Warningf("unexpected %s response for \"%s\" with no handler", resp.DataType, resp.Handle)
 		}
 
 		client.responsePool.Put(resp)
@@ -354,20 +397,26 @@ func (client *Client) request() *request {
 	return client.requestPool.Get().(*request)
 }
 
-func (client *Client) submit(pt rt.PT, funcname string, payload []byte) (string, error) {
-	var err error
+func (client *Client) submit(pt rt.PT, funcname string, payload []byte) (handle string, err error) {
 
-	client.outbound <- client.request().submitJob(pt, funcname, IdGen.Id(), payload)
+	defer func() {
+		if e := recover(); e != nil {
+			handle = ""
+			err = e.(error)
+		}
+	}()
 
-	res := <-client.expected
+	client.channels.outbound <- client.request().submitJob(pt, funcname, IdGen.Id(), payload)
 
-	if res.DataType == rt.PT_Error {
-		err = getError(res.Data)
+	if res := <-client.channels.expected; res != nil {
+		if res.DataType == rt.PT_Error {
+			err = getError(res.Data)
+		}
+		defer client.responsePool.Put(res)
+		return res.Handle, err
 	}
 
-	defer client.responsePool.Put(res)
-
-	return res.Handle, err
+	return "", errors.New("Got empty client.channels queue, please resubmit your message")
 }
 
 // Call the function and get a response.
@@ -459,10 +508,20 @@ func (client *Client) DoAt(funcname string, epoch int64, funcParam []byte) (hand
 // Get job status from job server.
 func (client *Client) Status(handle string) (status *Status, err error) {
 
-	client.outbound <- client.request().status(handle)
+	defer func() {
+		if e := recover(); e != nil {
+			status = nil
+			err = e.(error)
+		}
+	}()
 
-	res := <-client.expected
+	client.channels.outbound <- client.request().status(handle)
 
+	res := <-client.channels.expected
+
+	if res == nil {
+		return nil, errors.New("Status response queue is empty, please resend")
+	}
 	status, err = res.Status()
 
 	client.responsePool.Put(res)
@@ -472,9 +531,20 @@ func (client *Client) Status(handle string) (status *Status, err error) {
 // Echo.
 func (client *Client) Echo(data []byte) (echo []byte, err error) {
 
-	client.outbound <- client.request().echo(data)
+	defer func() {
+		if e := recover(); e != nil {
+			echo = nil
+			err = e.(error)
+		}
+	}()
 
-	res := <-client.expected
+	client.channels.outbound <- client.request().echo(data)
+
+	res := <-client.channels.expected
+
+	if res == nil {
+		return nil, errors.New("Echo request got empty response, please resend")
+	}
 
 	echo = res.Data
 

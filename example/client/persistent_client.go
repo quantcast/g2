@@ -78,27 +78,36 @@ func main() {
 	log.Println("Press Ctrl-C to exit ...")
 
 	for i := 0; ; i++ {
-		func_name := "ToUpper"
-		log.Println("Calling function", func_name, "with data:", echo)
-		handle, err := c.Do(func_name, echo, rt.JobNormal, jobHandler)
-		if err != nil {
-			log.Fatalln("Do Error:", err)
+
+		if !c.IsConnectionSet() {
+			log.Printf("No active connection to server.. waiting...")
+			time.Sleep(5 * time.Second)
+			continue
 		}
 
+		funcName := "ToUpper"
+		log.Println("Calling function", funcName, "with data:", echo)
+		handle, err := c.Do(funcName, echo, rt.JobNormal, jobHandler)
+		if err != nil {
+			log.Printf("Do %v ERROR:", funcName, err)
+		}
+
+		log.Printf("Calling Status for handle %v", handle)
 		status, err := c.Status(handle)
 		if err != nil {
-			log.Fatalf("Status: %v, error: %v", status, err)
+			log.Printf("Status: %v, ERROR: %v", status, err)
 		}
 
-		func_name = "Foobar"
-		log.Println("Calling function", func_name, "with data:", echo)
-		_, err = c.Do(func_name, echo, rt.JobNormal, jobHandler)
+		funcName = "Foobar"
+		log.Println("Calling function", funcName, "with data:", echo)
+		_, err = c.Do(funcName, echo, rt.JobNormal, jobHandler)
 		if err != nil {
-			log.Fatalln("Foobar Error: ", err)
+			log.Printf("Do %v ERROR:", funcName, err)
 		}
-		var sleep_seconds int = 2
+		var sleep_seconds int = 0
 		log.Printf("Finished Cycle %v, sleeping %v seconds", i, sleep_seconds)
 		time.Sleep(time.Duration(sleep_seconds) * time.Second)
+
 	}
 
 }

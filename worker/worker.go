@@ -154,7 +154,7 @@ func (worker *Worker) handleInPack(inpack *inPack) {
 	case rt.PT_JobAssign, rt.PT_JobAssignUniq:
 		go func() {
 			if err := worker.exec(inpack); err != nil {
-				worker.err(err)
+				inpack.a.reconnect_error(err)
 			}
 		}()
 		if worker.limit != nil {
