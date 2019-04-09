@@ -5,12 +5,11 @@ import (
 	"bytes"
 	"encoding/binary"
 	"github.com/felixge/tcpkeepalive"
+	rt "github.com/quantcast/g2/pkg/runtime"
 	"io"
 	"net"
 	"sync"
 	"time"
-
-	rt "github.com/quantcast/g2/pkg/runtime"
 )
 
 // The agent of job server.
@@ -41,13 +40,16 @@ func (a *agent) Connect() (err error) {
 	if err != nil {
 		return
 	}
-	a.rw = bufio.NewReadWriter(bufio.NewReader(a.conn),
-		bufio.NewWriter(a.conn))
 
 	kaConn, _ := tcpkeepalive.EnableKeepAlive(a.conn)
-	kaConn.SetKeepAliveIdle(100000*time.Second)
+	kaConn.SetKeepAliveIdle(1000*time.Second)
 	kaConn.SetKeepAliveCount(4)
-	kaConn.SetKeepAliveInterval(360*time.Second)
+	kaConn.SetKeepAliveInterval(10*time.Second)
+
+	a.conn = kaConn
+
+	a.rw = bufio.NewReadWriter(bufio.NewReader(a.conn),
+		bufio.NewWriter(a.conn))
 
 	go a.work()
 	return
@@ -169,13 +171,16 @@ func (a *agent) reconnect() error {
 		return err
 	}
 	a.conn = conn
-	a.rw = bufio.NewReadWriter(bufio.NewReader(a.conn),
-		bufio.NewWriter(a.conn))
 
 	kaConn, _ := tcpkeepalive.EnableKeepAlive(a.conn)
 	kaConn.SetKeepAliveIdle(100000*time.Second)
 	kaConn.SetKeepAliveCount(4)
 	kaConn.SetKeepAliveInterval(360*time.Second)
+
+	a.conn = kaConn
+
+	a.rw = bufio.NewReadWriter(bufio.NewReader(a.conn),
+		bufio.NewWriter(a.conn))
 
 	a.worker.reRegisterFuncsForAgent(a)
 	a.grab()
