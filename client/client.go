@@ -7,7 +7,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"github.com/felixge/tcpkeepalive"
 	"io"
 	"net"
 	"strings"
@@ -82,10 +81,12 @@ func NewConnected(conn net.Conn) (client *Client) {
 		requestPool:     &sync.Pool{New: func() interface{} { return &request{} }},
 	}
 
-	kaConn, _ := tcpkeepalive.EnableKeepAlive(client.conn)
-	kaConn.SetKeepAliveIdle(100000*time.Second)
-	kaConn.SetKeepAliveCount(4)
-	kaConn.SetKeepAliveInterval(360*time.Second)
+	//kaConn, _ := tcpkeepalive.EnableKeepAlive(client.conn)
+	//kaConn.SetKeepAliveIdle(100000*time.Second)
+	//kaConn.SetKeepAliveCount(4)
+	//kaConn.SetKeepAliveInterval(360*time.Second)
+
+	client.conn.Conn.(*net.TCPConn).SetKeepAlive(true)
 
 	go client.readLoop()
 	go client.writeLoop()
@@ -171,10 +172,13 @@ func (client *Client) reconnect(err error) error {
 
 	conn, err := net.Dial(client.net, client.addr)
 
+
 	if err != nil {
 		client.err(err)
 		return err
 	}
+
+	conn.(*net.TCPConn).SetKeepAlive(true)
 
 	swapped := atomic.CompareAndSwapPointer(
 		(*unsafe.Pointer)(unsafe.Pointer(&client.conn)),
