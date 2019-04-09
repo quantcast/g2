@@ -7,6 +7,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"github.com/felixge/tcpkeepalive"
 	"io"
 	"net"
 	"strings"
@@ -80,6 +81,11 @@ func NewConnected(conn net.Conn) (client *Client) {
 		responsePool:    &sync.Pool{New: func() interface{} { return &Response{} }},
 		requestPool:     &sync.Pool{New: func() interface{} { return &request{} }},
 	}
+
+	kaConn, _ := tcpkeepalive.EnableKeepAlive(client.conn)
+	kaConn.SetKeepAliveIdle(100000*time.Second)
+	kaConn.SetKeepAliveCount(4)
+	kaConn.SetKeepAliveInterval(360*time.Second)
 
 	go client.readLoop()
 	go client.writeLoop()

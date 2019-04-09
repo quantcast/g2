@@ -45,9 +45,10 @@ func (a *agent) Connect() (err error) {
 		bufio.NewWriter(a.conn))
 
 	kaConn, _ := tcpkeepalive.EnableKeepAlive(a.conn)
-	kaConn.SetKeepAliveIdle(30*time.Second)
+	kaConn.SetKeepAliveIdle(100000*time.Second)
 	kaConn.SetKeepAliveCount(4)
-	kaConn.SetKeepAliveInterval(5*time.Second)
+	kaConn.SetKeepAliveInterval(360*time.Second)
+
 	go a.work()
 	return
 }
@@ -170,6 +171,11 @@ func (a *agent) reconnect() error {
 	a.conn = conn
 	a.rw = bufio.NewReadWriter(bufio.NewReader(a.conn),
 		bufio.NewWriter(a.conn))
+
+	kaConn, _ := tcpkeepalive.EnableKeepAlive(a.conn)
+	kaConn.SetKeepAliveIdle(100000*time.Second)
+	kaConn.SetKeepAliveCount(4)
+	kaConn.SetKeepAliveInterval(360*time.Second)
 
 	a.worker.reRegisterFuncsForAgent(a)
 	a.grab()
