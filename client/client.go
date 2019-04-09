@@ -7,7 +7,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"github.com/felixge/tcpkeepalive"
 	"io"
 	"net"
 	"strings"
@@ -82,14 +81,12 @@ func NewConnected(conn net.Conn) (client *Client) {
 		requestPool:     &sync.Pool{New: func() interface{} { return &request{} }},
 	}
 
-	kaConn, _ := tcpkeepalive.EnableKeepAlive(client.conn.Conn)
-	kaConn.SetKeepAliveIdle(1000*time.Second)
-	kaConn.SetKeepAliveCount(4)
-	kaConn.SetKeepAliveInterval(10*time.Second)
-
-	//client.conn.Conn.(*net.TCPConn).SetKeepAlive(true)
-
-	client.conn.Conn = kaConn
+	//kaConn, _ := tcpkeepalive.EnableKeepAlive(client.conn.Conn)
+	//kaConn.SetKeepAliveIdle(1000*time.Second)
+	//kaConn.SetKeepAliveCount(4)
+	//kaConn.SetKeepAliveInterval(10*time.Second)
+	//
+	//client.conn.Conn = kaConn
 
 	go client.readLoop()
 	go client.writeLoop()
@@ -181,12 +178,12 @@ func (client *Client) reconnect(err error) error {
 		return err
 	}
 
-	kaConn, _ := tcpkeepalive.EnableKeepAlive(conn)
-	kaConn.SetKeepAliveIdle(1000*time.Second)
-	kaConn.SetKeepAliveCount(4)
-	kaConn.SetKeepAliveInterval(10*time.Second)
-
-	client.conn.Conn = kaConn
+	//kaConn, _ := tcpkeepalive.EnableKeepAlive(conn)
+	//kaConn.SetKeepAliveIdle(1000*time.Second)
+	//kaConn.SetKeepAliveCount(4)
+	//kaConn.SetKeepAliveInterval(10*time.Second)
+	//
+	//client.conn.Conn = kaConn
 
 	swapped := atomic.CompareAndSwapPointer(
 		(*unsafe.Pointer)(unsafe.Pointer(&client.conn)),
