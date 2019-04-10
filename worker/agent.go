@@ -48,13 +48,14 @@ func (a *agent) Connect() (err error) {
 		return
 	}
 
-	keepAlivePeriodError :=a.conn.(*net.TCPConn).SetKeepAlivePeriod(5*time.Second)
+	keepAlivePeriodError :=a.conn.(*net.TCPConn).SetKeepAlivePeriod(1*time.Second)
 	if keepAlivePeriodError!=nil {
 		log.Errorln("Can not set up keep-alive period for agent")
 		return
 	}
 
 	log.Infoln("Set keep-alive successfully")
+
 
 	a.rw = bufio.NewReadWriter(bufio.NewReader(a.conn),
 		bufio.NewWriter(a.conn))
@@ -186,7 +187,7 @@ func (a *agent) reconnect() error {
 		return keepAliveError
 	}
 
-	keepAlivePeriodError :=a.conn.(*net.TCPConn).SetKeepAlivePeriod(5*time.Second)
+	keepAlivePeriodError :=a.conn.(*net.TCPConn).SetKeepAlivePeriod(1*time.Second)
 	if keepAlivePeriodError!=nil {
 		log.Errorln("Can not set up keep-alive period for agent")
 		return keepAlivePeriodError

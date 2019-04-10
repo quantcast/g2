@@ -67,7 +67,7 @@ func New(network, addr string) (client *Client, err error) {
 		return nil, keepAliveError
 	}
 
-	keepAlivePeriodError :=conn.(*net.TCPConn).SetKeepAlivePeriod(5*time.Second)
+	keepAlivePeriodError :=conn.(*net.TCPConn).SetKeepAlivePeriod(1*time.Second)
 	if keepAlivePeriodError!=nil {
 		log.Errorln("Can not set up keep-alive period for client")
 		return nil, keepAlivePeriodError
@@ -90,7 +90,7 @@ func NewConnected(conn net.Conn) (client *Client) {
 		return nil
 	}
 
-	keepAlivePeriodError :=conn.(*net.TCPConn).SetKeepAlivePeriod(5*time.Second)
+	keepAlivePeriodError :=conn.(*net.TCPConn).SetKeepAlivePeriod(1*time.Second)
 	if keepAlivePeriodError!=nil {
 		log.Errorln("Can not set up keep-alive period for client")
 		return nil
@@ -209,7 +209,7 @@ func (client *Client) reconnect(err error) error {
 		return keepAliveError
 	}
 
-	keepAlivePeriodError :=conn.(*net.TCPConn).SetKeepAlivePeriod(5*time.Second)
+	keepAlivePeriodError :=conn.(*net.TCPConn).SetKeepAlivePeriod(1*time.Second)
 	if keepAlivePeriodError!=nil {
 		log.Errorln("Can not set up keep-alive period in reconnect of client")
 		return keepAlivePeriodError
