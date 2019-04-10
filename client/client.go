@@ -9,8 +9,6 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"os"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -64,41 +62,54 @@ func New(network, addr string) (client *Client, err error) {
 		return
 	}
 
+	//set up keep-alive for agent
+	keepAlivePeriodError :=conn.(*net.TCPConn).SetKeepAlivePeriod(70*time.Second)
+	if keepAlivePeriodError!=nil {
+		log.Errorln("Can not set up keep-alive period for agent")
+		return
+	}
+
+	keepAliveError :=conn.(*net.TCPConn).SetKeepAlive(true)
+	if keepAliveError!=nil {
+		log.Errorln("Can not set up keep-alive call for agent")
+		return
+	}
+
 	log.Infoln("Set keep-alive successfully")
 
 	client = NewConnected(conn)
 
-	sender(conn.(*net.TCPConn))
+	//sender(conn.(*net.TCPConn))
 
 	return
 }
 
-func sender(conn *net.TCPConn){
-
-	for i := 0; i < 10; i++{
-		words := strconv.Itoa(i)+"Hello I'm MyHeartbeat Client."
-		msg, err := conn.Write([]byte(words))
-		if err != nil {
-			log.Infoln(conn.RemoteAddr().String(), "Fatal error: ", err)
-			os.Exit(1)
-		}
-		log.Infoln("Sent it ", msg)
-		time.Sleep(2 * time.Second)
-	}
-	for i := 0; i < 2 ; i++ {
-		time.Sleep(12 * time.Second)
-	}
-	for i := 0; i < 10; i++{
-		words := strconv.Itoa(i)+"Hi I'm MyHeartbeat Client."
-		msg, err := conn.Write([]byte(words))
-		if err != nil {
-			log.Infoln(conn.RemoteAddr().String(), "Fatal error: ", err)
-			os.Exit(1)
-		}
-		log.Infoln("Sent it", msg)
-		time.Sleep(2 * time.Second)
-	}
-}
+//func sender(conn *net.TCPConn){
+//
+//	for i := 0; i < 10; i++{
+//		words := strconv.Itoa(i)+"Hello I'm MyHeartbeat Client."
+//		msg, err := conn.Write([]byte(words))
+//		if err != nil {
+//			log.Infoln(conn.RemoteAddr().String(), "Fatal error: ", err)
+//			os.Exit(1)
+//		}
+//		log.Infoln("Sent it ", msg)
+//		time.Sleep(2 * time.Second)
+//	}
+//	for i := 0; i < 2 ; i++ {
+//		time.Sleep(12 * time.Second)
+//	}
+//	for i := 0; i < 10; i++{
+//		words := strconv.Itoa(i)+"Hi I'm MyHeartbeat Client."
+//		msg, err := conn.Write([]byte(words))
+//		if err != nil {
+//			log.Infoln(conn.RemoteAddr().String(), "Fatal error: ", err)
+//			os.Exit(1)
+//		}
+//		log.Infoln("Sent it", msg)
+//		time.Sleep(2 * time.Second)
+//	}
+//}
 
 // Return a new client from an established connection. Largely used for
 // testing, though other use-cases can be imagined.
@@ -208,6 +219,17 @@ func (client *Client) reconnect(err error) error {
 	if err != nil {
 		client.err(err)
 		return err
+	}
+
+	//set up keep-alive for agent
+	keepAlivePeriodError :=conn.(*net.TCPConn).SetKeepAlivePeriod(70*time.Second)
+	if keepAlivePeriodError!=nil {
+		log.Errorln("Can not set up keep-alive period for agent")
+	}
+
+	keepAliveError :=conn.(*net.TCPConn).SetKeepAlive(true)
+	if keepAliveError!=nil {
+		log.Errorln("Can not set up keep-alive call for agent")
 	}
 
 	swapped := atomic.CompareAndSwapPointer(
