@@ -60,6 +60,8 @@ func New(network, addr string) (client *Client, err error) {
 		return
 	}
 
+	conn.(*net.TCPConn).SetKeepAlive(true)
+
 	client = NewConnected(conn)
 
 	return
@@ -87,6 +89,8 @@ func NewConnected(conn net.Conn) (client *Client) {
 	//kaConn.SetKeepAliveInterval(10*time.Second)
 	//
 	//client.conn.Conn = kaConn
+
+
 
 	go client.readLoop()
 	go client.writeLoop()
