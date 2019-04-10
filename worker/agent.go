@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"encoding/binary"
 	"github.com/appscode/go/log"
-	"github.com/felixge/tcpkeepalive"
 	rt "github.com/quantcast/g2/pkg/runtime"
 	"io"
 	"net"
@@ -34,42 +33,6 @@ func newAgent(net, addr string, worker *Worker) (a *agent, err error) {
 	return
 }
 
-//func sender(conn *net.TCPConn){
-//
-//	for i := 0; i < 10; i++{
-//		words := strconv.Itoa(i)+"Hello I'm MyHeartbeat Client."
-//		msg, err := conn.Write([]byte(words))
-//		if err != nil {
-//			log.Infoln(conn.RemoteAddr().String(), "Fatal error: ", err)
-//			os.Exit(1)
-//		}
-//		log.Infoln("Sent it ", msg)
-//		time.Sleep(2 * time.Second)
-//	}
-//	for i := 0; i < 2 ; i++ {
-//		time.Sleep(12 * time.Second)
-//	}
-//	for i := 0; i < 10; i++{
-//		words := strconv.Itoa(i)+"Hi I'm MyHeartbeat Client."
-//		msg, err := conn.Write([]byte(words))
-//		if err != nil {
-//			log.Infoln(conn.RemoteAddr().String(), "Fatal error: ", err)
-//			os.Exit(1)
-//		}
-//		log.Infoln("Sent it", msg)
-//		time.Sleep(2 * time.Second)
-//	}
-//}
-
-func (a *agent) SetKeepAlive(keepAlive bool) (err error) {
-	kaConn, error := tcpkeepalive.EnableKeepAlive(a.conn)
-	kaConn.SetKeepAliveIdle(30*time.Second)
-	kaConn.SetKeepAliveCount(100)
-	kaConn.SetKeepAliveInterval(10*time.Second)
-	a.conn = *kaConn
-
-	return error
-}
 
 
 func (a *agent) Connect() (err error) {
@@ -80,13 +43,12 @@ func (a *agent) Connect() (err error) {
 		return
 	}
 
-	//sender(a.conn.(*net.TCPConn))
+	ticker := time.Tick(8*time.Second)
 
-	keepAliveError := a.SetKeepAlive(true)
-	if keepAliveError!=nil {
-		log.Errorln("Failed to set up keep-alive")
+	for t := range ticker {
+		log.Infoln("Refreshing Connection By Heart Beat ", t)
+		a.conn, err = net.Dial(a.net, a.addr)
 	}
-	log.Infoln("Agent Set keep-alive successfully ")
 
 	a.rw = bufio.NewReadWriter(bufio.NewReader(a.conn),
 		bufio.NewWriter(a.conn))
@@ -211,12 +173,6 @@ func (a *agent) reconnect() error {
 		return err
 	}
 	a.conn = conn
-
-	keepAliveError := a.SetKeepAlive(true)
-	if keepAliveError!=nil {
-		log.Errorln("Failed to set up keep-alive for agent")
-	}
-	log.Infoln("Agent Set keep-alive successfully ")
 
 	a.rw = bufio.NewReadWriter(bufio.NewReader(a.conn),
 		bufio.NewWriter(a.conn))

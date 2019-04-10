@@ -7,7 +7,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"github.com/felixge/tcpkeepalive"
 	"io"
 	"net"
 	"strings"
@@ -64,50 +63,23 @@ func New(network, addr string) (client *Client, err error) {
 		return
 	}
 
-	kaConn, _ := tcpkeepalive.EnableKeepAlive(conn)
-	kaConn.SetKeepAliveIdle(30*time.Second)
-	kaConn.SetKeepAliveCount(100)
-	kaConn.SetKeepAliveInterval(10*time.Second)
+	ticker := time.Tick(8*time.Second)
 
-	client = NewConnected(*kaConn)
+	for t := range ticker {
+		log.Infoln("Refresh Connection Heart Beat", t)
+		conn, err = net.Dial(network, addr)
+	}
 
-	//sender(conn.(*net.TCPConn))
+	client = NewConnected(conn)
+
 
 	return
 }
 
-//func sender(conn *net.TCPConn){
-//
-//	for i := 0; i < 10; i++{
-//		words := strconv.Itoa(i)+"Hello I'm MyHeartbeat Client."
-//		msg, err := conn.Write([]byte(words))
-//		if err != nil {
-//			log.Infoln(conn.RemoteAddr().String(), "Fatal error: ", err)
-//			os.Exit(1)
-//		}
-//		log.Infoln("Sent it ", msg)
-//		time.Sleep(2 * time.Second)
-//	}
-//	for i := 0; i < 2 ; i++ {
-//		time.Sleep(12 * time.Second)
-//	}
-//	for i := 0; i < 10; i++{
-//		words := strconv.Itoa(i)+"Hi I'm MyHeartbeat Client."
-//		msg, err := conn.Write([]byte(words))
-//		if err != nil {
-//			log.Infoln(conn.RemoteAddr().String(), "Fatal error: ", err)
-//			os.Exit(1)
-//		}
-//		log.Infoln("Sent it", msg)
-//		time.Sleep(2 * time.Second)
-//	}
-//}
 
 // Return a new client from an established connection. Largely used for
 // testing, though other use-cases can be imagined.
 func NewConnected(conn net.Conn) (client *Client) {
-
-	log.Infoln("Set keep-alive successfully")
 
 	addr := conn.RemoteAddr()
 
@@ -213,11 +185,11 @@ func (client *Client) reconnect(err error) error {
 		return err
 	}
 
-	kaConn, _ := tcpkeepalive.EnableKeepAlive(conn)
-	kaConn.SetKeepAliveIdle(30*time.Second)
-	kaConn.SetKeepAliveCount(100)
-	kaConn.SetKeepAliveInterval(10*time.Second)
-	client.conn.Conn = *kaConn
+	//kaConn, _ := tcpkeepalive.EnableKeepAlive(conn)
+	//kaConn.SetKeepAliveIdle(30*time.Second)
+	//kaConn.SetKeepAliveCount(100)
+	//kaConn.SetKeepAliveInterval(10*time.Second)
+	//client.conn.Conn = *kaConn
 
 	swapped := atomic.CompareAndSwapPointer(
 		(*unsafe.Pointer)(unsafe.Pointer(&client.conn)),
