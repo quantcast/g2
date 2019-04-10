@@ -165,6 +165,19 @@ func (s *Server) Start() {
 		if err != nil { // handle error
 			continue
 		}
+
+		keepAlivePeriodError :=conn.(*net.TCPConn).SetKeepAlivePeriod(70*time.Second)
+		if keepAlivePeriodError!=nil {
+			log.Errorln("Can not set up keep-alive period for agent")
+			return
+		}
+
+		keepAliveError :=conn.(*net.TCPConn).SetKeepAlive(true)
+		if keepAliveError!=nil {
+			log.Errorln("Can not set up keep-alive call for agent")
+			return
+		}
+
 		session := &session{}
 		go session.handleConnection(s, conn)
 	}
