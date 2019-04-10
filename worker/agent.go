@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/binary"
+	"github.com/felixge/tcpkeepalive"
 	rt "github.com/quantcast/g2/pkg/runtime"
 	"io"
 	"net"
@@ -40,15 +41,15 @@ func (a *agent) Connect() (err error) {
 		return
 	}
 
-	//kaConn, _ := tcpkeepalive.EnableKeepAlive(a.conn)
-	//kaConn.SetKeepAliveIdle(1000*time.Second)
-	//kaConn.SetKeepAliveCount(4)
-	//kaConn.SetKeepAliveInterval(10*time.Second)
-	//
-	//a.conn = kaConn
+	kaConn, _ := tcpkeepalive.EnableKeepAlive(a.conn)
+	kaConn.SetKeepAliveIdle(30*time.Second)
+	kaConn.SetKeepAliveCount(4)
+	kaConn.SetKeepAliveInterval(5*time.Second)
 
-	a.conn.(*net.TCPConn).SetKeepAlive(true)
-	a.conn.(*net.TCPConn).SetKeepAlivePeriod(10*time.Second)
+	a.conn = kaConn
+
+	//a.conn.(*net.TCPConn).SetKeepAlive(true)
+	//a.conn.(*net.TCPConn).SetKeepAlivePeriod(10*time.Second)
 
 	a.rw = bufio.NewReadWriter(bufio.NewReader(a.conn),
 		bufio.NewWriter(a.conn))
@@ -174,15 +175,14 @@ func (a *agent) reconnect() error {
 	}
 	a.conn = conn
 
-	a.conn.(*net.TCPConn).SetKeepAlive(true)
-	a.conn.(*net.TCPConn).SetKeepAlivePeriod(10*time.Second)
+	//a.conn.(*net.TCPConn).SetKeepAlive(true)
+	//a.conn.(*net.TCPConn).SetKeepAlivePeriod(10*time.Second)
 
-	//kaConn, _ := tcpkeepalive.EnableKeepAlive(a.conn)
-	//kaConn.SetKeepAliveIdle(100000*time.Second)
-	//kaConn.SetKeepAliveCount(4)
-	//kaConn.SetKeepAliveInterval(360*time.Second)
-	//
-	//a.conn = kaConn
+	kaConn, _ := tcpkeepalive.EnableKeepAlive(a.conn)
+	kaConn.SetKeepAliveIdle(30*time.Second)
+	kaConn.SetKeepAliveCount(4)
+	kaConn.SetKeepAliveInterval(5*time.Second)
+	a.conn = kaConn
 
 	a.rw = bufio.NewReadWriter(bufio.NewReader(a.conn),
 		bufio.NewWriter(a.conn))

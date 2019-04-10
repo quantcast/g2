@@ -7,6 +7,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"github.com/felixge/tcpkeepalive"
 	"io"
 	"net"
 	"strings"
@@ -60,8 +61,15 @@ func New(network, addr string) (client *Client, err error) {
 		return
 	}
 
-	conn.(*net.TCPConn).SetKeepAlive(true)
-	conn.(*net.TCPConn).SetKeepAlivePeriod(10*time.Second)
+	kaConn, _ := tcpkeepalive.EnableKeepAlive(conn)
+	kaConn.SetKeepAliveIdle(30*time.Second)
+	kaConn.SetKeepAliveCount(4)
+	kaConn.SetKeepAliveInterval(5*time.Second)
+
+	conn = kaConn
+
+	//conn.(*net.TCPConn).SetKeepAlive(true)
+	//conn.(*net.TCPConn).SetKeepAlivePeriod(10*time.Second)
 
 	client = NewConnected(conn)
 
@@ -183,12 +191,11 @@ func (client *Client) reconnect(err error) error {
 		return err
 	}
 
-	//kaConn, _ := tcpkeepalive.EnableKeepAlive(conn)
-	//kaConn.SetKeepAliveIdle(1000*time.Second)
-	//kaConn.SetKeepAliveCount(4)
-	//kaConn.SetKeepAliveInterval(10*time.Second)
-	//
-	//client.conn.Conn = kaConn
+	kaConn, _ := tcpkeepalive.EnableKeepAlive(conn)
+	kaConn.SetKeepAliveIdle(30*time.Second)
+	kaConn.SetKeepAliveCount(4)
+	kaConn.SetKeepAliveInterval(5*time.Second)
+	client.conn.Conn = kaConn
 
 	swapped := atomic.CompareAndSwapPointer(
 		(*unsafe.Pointer)(unsafe.Pointer(&client.conn)),
