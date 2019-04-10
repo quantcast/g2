@@ -54,6 +54,8 @@ func (a *agent) Connect() (err error) {
 		return
 	}
 
+	log.Infoln("Set keep-alive successfully")
+
 	a.rw = bufio.NewReadWriter(bufio.NewReader(a.conn),
 		bufio.NewWriter(a.conn))
 
@@ -189,6 +191,8 @@ func (a *agent) reconnect() error {
 		log.Errorln("Can not set up keep-alive period for agent")
 		return keepAlivePeriodError
 	}
+
+	log.Infoln("Set keep-alive successfully")
 
 	a.rw = bufio.NewReadWriter(bufio.NewReader(a.conn),
 		bufio.NewWriter(a.conn))

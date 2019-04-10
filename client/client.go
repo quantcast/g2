@@ -73,6 +73,7 @@ func New(network, addr string) (client *Client, err error) {
 		return nil, keepAlivePeriodError
 	}
 
+	log.Infoln("Set keep-alive successfully")
 
 	client = NewConnected(conn)
 
@@ -94,6 +95,8 @@ func NewConnected(conn net.Conn) (client *Client) {
 		log.Errorln("Can not set up keep-alive period for client")
 		return nil
 	}
+
+	log.Infoln("Set keep-alive successfully")
 
 	addr := conn.RemoteAddr()
 
@@ -211,6 +214,8 @@ func (client *Client) reconnect(err error) error {
 		log.Errorln("Can not set up keep-alive period in reconnect of client")
 		return keepAlivePeriodError
 	}
+
+	log.Infoln("Set keep-alive successfully")
 
 	swapped := atomic.CompareAndSwapPointer(
 		(*unsafe.Pointer)(unsafe.Pointer(&client.conn)),
