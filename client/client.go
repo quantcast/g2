@@ -61,17 +61,18 @@ func New(network, addr string) (client *Client, err error) {
 		return
 	}
 
+	keepAlivePeriodError :=conn.(*net.TCPConn).SetKeepAlivePeriod(1*time.Second)
+	if keepAlivePeriodError!=nil {
+		log.Errorln("Can not set up keep-alive period for client")
+		return nil, keepAlivePeriodError
+	}
+
 	keepAliveError :=conn.(*net.TCPConn).SetKeepAlive(true)
 	if keepAliveError!=nil {
 		log.Errorln("Can not set up keep-alive call for client")
 		return nil, keepAliveError
 	}
 
-	keepAlivePeriodError :=conn.(*net.TCPConn).SetKeepAlivePeriod(1*time.Second)
-	if keepAlivePeriodError!=nil {
-		log.Errorln("Can not set up keep-alive period for client")
-		return nil, keepAlivePeriodError
-	}
 
 	log.Infoln("Set keep-alive successfully")
 
@@ -84,15 +85,15 @@ func New(network, addr string) (client *Client, err error) {
 // testing, though other use-cases can be imagined.
 func NewConnected(conn net.Conn) (client *Client) {
 
-	keepAliveError :=conn.(*net.TCPConn).SetKeepAlive(true)
-	if keepAliveError!=nil {
-		log.Errorln("Can not set up keep-alive call for client")
-		return nil
-	}
-
 	keepAlivePeriodError :=conn.(*net.TCPConn).SetKeepAlivePeriod(1*time.Second)
 	if keepAlivePeriodError!=nil {
 		log.Errorln("Can not set up keep-alive period for client")
+		return nil
+	}
+
+	keepAliveError :=conn.(*net.TCPConn).SetKeepAlive(true)
+	if keepAliveError!=nil {
+		log.Errorln("Can not set up keep-alive call for client")
 		return nil
 	}
 
