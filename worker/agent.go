@@ -130,7 +130,7 @@ func (a *agent) Grab() (err error) {
 func (a *agent) grab() (err error) {
 	outpack := getOutPack()
 	outpack.dataType = rt.PT_GrabJobUniq
-	return a.write(outpack)
+	return a.Write(outpack)
 }
 
 func (a *agent) PreSleep() (err error) {
@@ -138,7 +138,7 @@ func (a *agent) PreSleep() (err error) {
 	defer a.Unlock()
 	outpack := getOutPack()
 	outpack.dataType = rt.PT_PreSleep
-	return a.write(outpack)
+	return a.Write(outpack)
 }
 
 func (a *agent) grabReconnectState() (success bool) {
@@ -185,7 +185,7 @@ func (a *agent) Connect() {
 			_ = atomic.SwapPointer((*unsafe.Pointer)(unsafe.Pointer(&a.rw)), nil)
 
 			if num_tries%100 == 0 {
-				log.Println("Still trying to connect to server %v, attempt# %v ...", a.addr, num_tries)
+				log.Printf("Still trying to connect to server %v, attempt# %v ...", a.addr, num_tries)
 			}
 			conn, err = net.Dial(a.net, a.addr)
 			if err != nil {
@@ -278,7 +278,7 @@ func (a *agent) read() (data []byte, err error) {
 }
 
 // Internal write the encoded job.
-func (a *agent) write(outpack *outPack) (err error) {
+func (a *agent) Write(outpack *outPack) (err error) {
 
 	if a.rw == nil {
 		return errors.New("Reconnect is active, discarding the response")
@@ -293,11 +293,4 @@ func (a *agent) write(outpack *outPack) (err error) {
 		}
 	}
 	return a.rw.Flush()
-}
-
-// Write with lock
-func (a *agent) Write(outpack *outPack) (err error) {
-	a.Lock()
-	defer a.Unlock()
-	return a.write(outpack)
 }
