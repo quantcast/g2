@@ -7,7 +7,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"github.com/felixge/tcpkeepalive"
 	"io"
 	"net"
 	"strings"
@@ -57,19 +56,23 @@ type Client struct {
 func New(network, addr string) (client *Client, err error) {
 	conn, err := net.Dial(network, addr)
 
+
 	if err != nil {
 		return
 	}
 
-	kaConn, _ := tcpkeepalive.EnableKeepAlive(conn)
-	kaConn.SetKeepAliveIdle(30*time.Second)
-	kaConn.SetKeepAliveCount(4)
-	kaConn.SetKeepAliveInterval(5*time.Second)
+	keepAliveError :=conn.(*net.TCPConn).SetKeepAlive(true)
+	if keepAliveError!=nil {
+		log.Errorln("Can not set up keep-alive call for client")
+		return nil, keepAliveError
+	}
 
-	conn = kaConn
+	keepAlivePeriodError :=conn.(*net.TCPConn).SetKeepAlivePeriod(5*time.Second)
+	if keepAlivePeriodError!=nil {
+		log.Errorln("Can not set up keep-alive period for client")
+		return nil, keepAlivePeriodError
+	}
 
-	//conn.(*net.TCPConn).SetKeepAlive(true)
-	//conn.(*net.TCPConn).SetKeepAlivePeriod(10*time.Second)
 
 	client = NewConnected(conn)
 
@@ -79,6 +82,19 @@ func New(network, addr string) (client *Client, err error) {
 // Return a new client from an established connection. Largely used for
 // testing, though other use-cases can be imagined.
 func NewConnected(conn net.Conn) (client *Client) {
+
+	keepAliveError :=conn.(*net.TCPConn).SetKeepAlive(true)
+	if keepAliveError!=nil {
+		log.Errorln("Can not set up keep-alive call for client")
+		return nil
+	}
+
+	keepAlivePeriodError :=conn.(*net.TCPConn).SetKeepAlivePeriod(5*time.Second)
+	if keepAlivePeriodError!=nil {
+		log.Errorln("Can not set up keep-alive period for client")
+		return nil
+	}
+
 	addr := conn.RemoteAddr()
 
 	client = &Client{
@@ -91,14 +107,6 @@ func NewConnected(conn net.Conn) (client *Client) {
 		responsePool:    &sync.Pool{New: func() interface{} { return &Response{} }},
 		requestPool:     &sync.Pool{New: func() interface{} { return &request{} }},
 	}
-
-	//kaConn, _ := tcpkeepalive.EnableKeepAlive(client.conn.Conn)
-	//kaConn.SetKeepAliveIdle(1000*time.Second)
-	//kaConn.SetKeepAliveCount(4)
-	//kaConn.SetKeepAliveInterval(10*time.Second)
-	//
-	//client.conn.Conn = kaConn
-
 
 
 	go client.readLoop()
@@ -191,11 +199,18 @@ func (client *Client) reconnect(err error) error {
 		return err
 	}
 
-	kaConn, _ := tcpkeepalive.EnableKeepAlive(conn)
-	kaConn.SetKeepAliveIdle(30*time.Second)
-	kaConn.SetKeepAliveCount(4)
-	kaConn.SetKeepAliveInterval(5*time.Second)
-	client.conn.Conn = kaConn
+	//set up keep-alive
+	keepAliveError :=conn.(*net.TCPConn).SetKeepAlive(true)
+	if keepAliveError!=nil {
+		log.Errorln("Can not set up keep-alive call in reconnect of client")
+		return keepAliveError
+	}
+
+	keepAlivePeriodError :=conn.(*net.TCPConn).SetKeepAlivePeriod(5*time.Second)
+	if keepAlivePeriodError!=nil {
+		log.Errorln("Can not set up keep-alive period in reconnect of client")
+		return keepAlivePeriodError
+	}
 
 	swapped := atomic.CompareAndSwapPointer(
 		(*unsafe.Pointer)(unsafe.Pointer(&client.conn)),
