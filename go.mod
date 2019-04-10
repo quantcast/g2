@@ -23,7 +23,6 @@ require (
 	github.com/spf13/pflag v1.0.1
 	github.com/stretchr/testify v1.3.0
 	github.com/syndtr/goleveldb v0.0.0-20180815032940-ae2bd5eed72d
-	golang.org/x/sync v0.0.0-20181221193216-37e7f081c4d4 // indirect
 	gopkg.in/check.v1 v1.0.0-20180628173108-788fd7840127 // indirect
 	gopkg.in/mgo.v2 v2.0.0-20180705113604-9856a29383ce // indirect
 	gopkg.in/robfig/cron.v2 v2.0.0-20150107220207-be2e0b0deed5

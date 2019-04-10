@@ -5,6 +5,7 @@ package worker
 import (
 	"encoding/binary"
 	"fmt"
+	"log"
 	"sync"
 	"time"
 
@@ -154,7 +155,8 @@ func (worker *Worker) handleInPack(inpack *inPack) {
 	case rt.PT_JobAssign, rt.PT_JobAssignUniq:
 		go func() {
 			if err := worker.exec(inpack); err != nil {
-				inpack.a.reconnect_error(err)
+				log.Printf("ERROR %v in handleInPack(server: %v, job %v), discarding the results because cannot send them back to gearman", err, inpack.a.addr, inpack.handle)
+				inpack.a.Connect()
 			}
 		}()
 		if worker.limit != nil {
@@ -242,9 +244,7 @@ func (worker *Worker) ReconnectAllAgents() error {
 	defer worker.Unlock()
 	if worker.running == true {
 		for _, a := range worker.agents {
-			if err := a.Connect(); err != nil {
-				return err
-			}
+			a.Connect()
 		}
 	}
 	return nil
@@ -395,7 +395,8 @@ func (e *WorkerDisconnectError) Error() string {
 
 // Responds to the error by asking the worker to reconnect
 func (e *WorkerDisconnectError) Reconnect() (err error) {
-	return e.agent.Connect()
+	e.agent.Connect()
+	return nil
 }
 
 // Which server was this for?

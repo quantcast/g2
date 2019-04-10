@@ -5,7 +5,6 @@ import (
 	"os"
 	"time"
 
-	logs "github.com/appscode/go/log/golog"
 	"github.com/quantcast/g2/client"
 	rt "github.com/quantcast/g2/pkg/runtime"
 )

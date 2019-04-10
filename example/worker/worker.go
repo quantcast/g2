@@ -40,13 +40,7 @@ func main() {
 	w := worker.New(worker.Unlimited)
 	defer w.Close()
 	w.ErrorHandler = func(e error) {
-
-		disc_error, ok := e.(*worker.WorkerDisconnectError)
-		if ok {
-			disc_error.Reconnect()
-		} else {
-			log.Println("Error occurred in worker:", e)
-		}
+		log.Println("Error occurred in worker:", e)
 
 		if opErr, ok := e.(*net.OpError); ok {
 			if !opErr.Temporary() {

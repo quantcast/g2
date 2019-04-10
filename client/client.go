@@ -93,6 +93,8 @@ func NewNetClient(network, addr string) (client *Client, err error) {
 				time.Sleep(time.Second)
 				continue
 			}
+			conn.(*net.TCPConn).SetKeepAlive(true)
+
 			break
 		}
 		log.Infof("Connected to server %v", addr)
