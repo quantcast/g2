@@ -63,15 +63,15 @@ func New(network, addr string) (client *Client, err error) {
 	}
 
 	//set up keep-alive for agent
-	keepAlivePeriodError :=conn.(*net.TCPConn).SetKeepAlivePeriod(70*time.Second)
-	if keepAlivePeriodError!=nil {
-		log.Errorln("Can not set up keep-alive period for agent")
-		return
-	}
-
 	keepAliveError :=conn.(*net.TCPConn).SetKeepAlive(true)
 	if keepAliveError!=nil {
 		log.Errorln("Can not set up keep-alive call for agent")
+		return
+	}
+
+	keepAlivePeriodError :=conn.(*net.TCPConn).SetKeepAlivePeriod(50*time.Second)
+	if keepAlivePeriodError!=nil {
+		log.Errorln("Can not set up keep-alive period for agent")
 		return
 	}
 
@@ -222,14 +222,14 @@ func (client *Client) reconnect(err error) error {
 	}
 
 	//set up keep-alive for agent
-	keepAlivePeriodError :=conn.(*net.TCPConn).SetKeepAlivePeriod(70*time.Second)
-	if keepAlivePeriodError!=nil {
-		log.Errorln("Can not set up keep-alive period for agent")
-	}
-
 	keepAliveError :=conn.(*net.TCPConn).SetKeepAlive(true)
 	if keepAliveError!=nil {
 		log.Errorln("Can not set up keep-alive call for agent")
+	}
+
+	keepAlivePeriodError :=conn.(*net.TCPConn).SetKeepAlivePeriod(50*time.Second)
+	if keepAlivePeriodError!=nil {
+		log.Errorln("Can not set up keep-alive period for agent")
 	}
 
 	swapped := atomic.CompareAndSwapPointer(

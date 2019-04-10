@@ -71,19 +71,17 @@ func (a *agent) Connect() (err error) {
 	//sender(a.conn.(*net.TCPConn))
 
 	//set up keep-alive for agent
-	keepAlivePeriodError :=a.conn.(*net.TCPConn).SetKeepAlivePeriod(70*time.Second)
-	if keepAlivePeriodError!=nil {
-		log.Errorln("Can not set up keep-alive period for agent")
-		return
-	}
-
 	keepAliveError :=a.conn.(*net.TCPConn).SetKeepAlive(true)
 	if keepAliveError!=nil {
 		log.Errorln("Can not set up keep-alive call for agent")
 		return
 	}
 
-
+	keepAlivePeriodError :=a.conn.(*net.TCPConn).SetKeepAlivePeriod(50*time.Second)
+	if keepAlivePeriodError!=nil {
+		log.Errorln("Can not set up keep-alive period for agent")
+		return
+	}
 
 
 	log.Infoln("Set keep-alive successfully")
@@ -213,16 +211,14 @@ func (a *agent) reconnect() error {
 	}
 	a.conn = conn
 
-	keepAlivePeriodError :=a.conn.(*net.TCPConn).SetKeepAlivePeriod(70*time.Second)
-	if keepAlivePeriodError!=nil {
-		log.Errorln("Can not set up keep-alive period for agent")
-		return keepAlivePeriodError
-	}
-
 	keepAliveError :=a.conn.(*net.TCPConn).SetKeepAlive(true)
 	if keepAliveError!=nil {
 		log.Errorln("Can not set up keep-alive call for agent")
-		return keepAliveError
+	}
+
+	keepAlivePeriodError :=a.conn.(*net.TCPConn).SetKeepAlivePeriod(50*time.Second)
+	if keepAlivePeriodError!=nil {
+		log.Errorln("Can not set up keep-alive period for agent")
 	}
 
 	log.Infoln("Set keep-alive successfully")
