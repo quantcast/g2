@@ -375,9 +375,12 @@ func (client *Client) process(resp *Response) {
 	case rt.PT_WorkData, rt.PT_WorkWarning, rt.PT_WorkStatus:
 		// These alternate conditions should not happen so long as
 		// everyone is following the specification.
+		log.Infof("process(): got %v for handle %v", resp.DataType, resp.Handle)
 		if handler, ok := client.handlers.Load(resp.Handle); ok {
 			if h, ok := handler.(ResponseHandler); ok {
 				h(resp)
+			} else {
+				log.Warningf("Could not cast handler to ResponseHandler for %v", resp.Handle)
 			}
 		} else {
 			log.Warningf("unexpected %s response for \"%s\" with no handler", resp.DataType, resp.Handle)
@@ -437,6 +440,8 @@ func (client *Client) Do(funcname string, payload []byte,
 	handle, err = client.submit(pt, funcname, payload)
 
 	client.handlers.Store(handle, h)
+
+	log.Infof("submit(): got handle %v for job %v", handle, funcname)
 
 	return
 }
