@@ -8,6 +8,8 @@ import (
 	rt "github.com/quantcast/g2/pkg/runtime"
 	"io"
 	"net"
+	"os"
+	"strconv"
 	"sync"
 	"time"
 )
@@ -33,6 +35,33 @@ func newAgent(net, addr string, worker *Worker) (a *agent, err error) {
 	return
 }
 
+func sender(conn *net.TCPConn){
+
+	for i := 0; i < 10; i++{
+		words := strconv.Itoa(i)+"Hello I'm MyHeartbeat Client."
+		msg, err := conn.Write([]byte(words))
+		if err != nil {
+			log.Infoln(conn.RemoteAddr().String(), "Fatal error: ", err)
+			os.Exit(1)
+		}
+		log.Infoln("Sent it ", msg)
+		time.Sleep(2 * time.Second)
+	}
+	for i := 0; i < 2 ; i++ {
+		time.Sleep(12 * time.Second)
+	}
+	for i := 0; i < 10; i++{
+		words := strconv.Itoa(i)+"Hi I'm MyHeartbeat Client."
+		msg, err := conn.Write([]byte(words))
+		if err != nil {
+			log.Infoln(conn.RemoteAddr().String(), "Fatal error: ", err)
+			os.Exit(1)
+		}
+		log.Infoln("Sent it", msg)
+		time.Sleep(2 * time.Second)
+	}
+}
+
 func (a *agent) Connect() (err error) {
 	a.Lock()
 	defer a.Unlock()
@@ -41,18 +70,22 @@ func (a *agent) Connect() (err error) {
 		return
 	}
 
+	sender(a.conn.(*net.TCPConn))
 	//set up keep-alive for agent
-	keepAlivePeriodError :=a.conn.(*net.TCPConn).SetKeepAlivePeriod(1*time.Second)
-	if keepAlivePeriodError!=nil {
-		log.Errorln("Can not set up keep-alive period for agent")
-		return
-	}
+	//keepAlivePeriodError :=a.conn.(*net.TCPConn).SetKeepAlivePeriod(1*time.Second)
+	//if keepAlivePeriodError!=nil {
+	//	log.Errorln("Can not set up keep-alive period for agent")
+	//	return
+	//}
+	//
+	//keepAliveError :=a.conn.(*net.TCPConn).SetKeepAlive(true)
+	//if keepAliveError!=nil {
+	//	log.Errorln("Can not set up keep-alive call for agent")
+	//	return
+	//}
 
-	keepAliveError :=a.conn.(*net.TCPConn).SetKeepAlive(true)
-	if keepAliveError!=nil {
-		log.Errorln("Can not set up keep-alive call for agent")
-		return
-	}
+
+
 
 	log.Infoln("Set keep-alive successfully")
 

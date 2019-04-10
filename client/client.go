@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -54,6 +56,7 @@ type Client struct {
 
 // Return a client.
 func New(network, addr string) (client *Client, err error) {
+
 	conn, err := net.Dial(network, addr)
 
 
@@ -61,41 +64,45 @@ func New(network, addr string) (client *Client, err error) {
 		return
 	}
 
-	keepAlivePeriodError :=conn.(*net.TCPConn).SetKeepAlivePeriod(1*time.Second)
-	if keepAlivePeriodError!=nil {
-		log.Errorln("Can not set up keep-alive period for client")
-		return nil, keepAlivePeriodError
-	}
-
-	keepAliveError :=conn.(*net.TCPConn).SetKeepAlive(true)
-	if keepAliveError!=nil {
-		log.Errorln("Can not set up keep-alive call for client")
-		return nil, keepAliveError
-	}
-
-
 	log.Infoln("Set keep-alive successfully")
 
 	client = NewConnected(conn)
 
+	sender(conn.(*net.TCPConn))
+
 	return
+}
+
+func sender(conn *net.TCPConn){
+
+	for i := 0; i < 10; i++{
+		words := strconv.Itoa(i)+"Hello I'm MyHeartbeat Client."
+		msg, err := conn.Write([]byte(words))
+		if err != nil {
+			log.Infoln(conn.RemoteAddr().String(), "Fatal error: ", err)
+			os.Exit(1)
+		}
+		log.Infoln("Sent it ", msg)
+		time.Sleep(2 * time.Second)
+	}
+	for i := 0; i < 2 ; i++ {
+		time.Sleep(12 * time.Second)
+	}
+	for i := 0; i < 10; i++{
+		words := strconv.Itoa(i)+"Hi I'm MyHeartbeat Client."
+		msg, err := conn.Write([]byte(words))
+		if err != nil {
+			log.Infoln(conn.RemoteAddr().String(), "Fatal error: ", err)
+			os.Exit(1)
+		}
+		log.Infoln("Sent it", msg)
+		time.Sleep(2 * time.Second)
+	}
 }
 
 // Return a new client from an established connection. Largely used for
 // testing, though other use-cases can be imagined.
 func NewConnected(conn net.Conn) (client *Client) {
-
-	keepAlivePeriodError :=conn.(*net.TCPConn).SetKeepAlivePeriod(1*time.Second)
-	if keepAlivePeriodError!=nil {
-		log.Errorln("Can not set up keep-alive period for client")
-		return nil
-	}
-
-	keepAliveError :=conn.(*net.TCPConn).SetKeepAlive(true)
-	if keepAliveError!=nil {
-		log.Errorln("Can not set up keep-alive call for client")
-		return nil
-	}
 
 	log.Infoln("Set keep-alive successfully")
 
@@ -202,21 +209,6 @@ func (client *Client) reconnect(err error) error {
 		client.err(err)
 		return err
 	}
-
-	//set up keep-alive
-	keepAliveError :=conn.(*net.TCPConn).SetKeepAlive(true)
-	if keepAliveError!=nil {
-		log.Errorln("Can not set up keep-alive call in reconnect of client")
-		return keepAliveError
-	}
-
-	keepAlivePeriodError :=conn.(*net.TCPConn).SetKeepAlivePeriod(1*time.Second)
-	if keepAlivePeriodError!=nil {
-		log.Errorln("Can not set up keep-alive period in reconnect of client")
-		return keepAlivePeriodError
-	}
-
-	log.Infoln("Set keep-alive successfully")
 
 	swapped := atomic.CompareAndSwapPointer(
 		(*unsafe.Pointer)(unsafe.Pointer(&client.conn)),
