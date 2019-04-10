@@ -60,6 +60,25 @@ func newAgent(net, addr string, worker *Worker) (a *agent, err error) {
 //	}
 //}
 
+func (a *agent) SetKeepAlive(keepAlive bool) (err error){
+	if keepAlive {
+		//set up keep-alive for agent
+		keepAliveError :=a.conn.(*net.TCPConn).SetKeepAlive(true)
+		if keepAliveError!=nil {
+			log.Errorln("Can not set up keep-alive call for agent")
+			return keepAliveError
+		}
+
+		keepAlivePeriodError :=a.conn.(*net.TCPConn).SetKeepAlivePeriod(30*time.Second)
+		if keepAlivePeriodError!=nil {
+			log.Errorln("Can not set up keep-alive period for agent")
+			return keepAliveError
+		}
+	}
+	return nil
+}
+
+
 func (a *agent) Connect() (err error) {
 	a.Lock()
 	defer a.Unlock()
@@ -70,22 +89,11 @@ func (a *agent) Connect() (err error) {
 
 	//sender(a.conn.(*net.TCPConn))
 
-	//set up keep-alive for agent
-	keepAliveError :=a.conn.(*net.TCPConn).SetKeepAlive(true)
+	keepAliveError := a.SetKeepAlive(true)
 	if keepAliveError!=nil {
-		log.Errorln("Can not set up keep-alive call for agent")
-		return
+		log.Errorln("Failed make agent connection keep-alived")
 	}
-
-	keepAlivePeriodError :=a.conn.(*net.TCPConn).SetKeepAlivePeriod(50*time.Second)
-	if keepAlivePeriodError!=nil {
-		log.Errorln("Can not set up keep-alive period for agent")
-		return
-	}
-
-
-	log.Infoln("Set keep-alive successfully")
-
+	log.Infoln("Agent Set keep-alive successfully ")
 
 	a.rw = bufio.NewReadWriter(bufio.NewReader(a.conn),
 		bufio.NewWriter(a.conn))
@@ -211,17 +219,11 @@ func (a *agent) reconnect() error {
 	}
 	a.conn = conn
 
-	keepAliveError :=a.conn.(*net.TCPConn).SetKeepAlive(true)
+	keepAliveError := a.SetKeepAlive(true)
 	if keepAliveError!=nil {
-		log.Errorln("Can not set up keep-alive call for agent")
+		log.Errorln("Failed make agent connection keep-alived")
 	}
-
-	keepAlivePeriodError :=a.conn.(*net.TCPConn).SetKeepAlivePeriod(50*time.Second)
-	if keepAlivePeriodError!=nil {
-		log.Errorln("Can not set up keep-alive period for agent")
-	}
-
-	log.Infoln("Set keep-alive successfully")
+	log.Infoln("Agent Set keep-alive successfully ")
 
 	a.rw = bufio.NewReadWriter(bufio.NewReader(a.conn),
 		bufio.NewWriter(a.conn))
