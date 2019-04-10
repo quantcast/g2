@@ -61,6 +61,7 @@ func New(network, addr string) (client *Client, err error) {
 	}
 
 	conn.(*net.TCPConn).SetKeepAlive(true)
+	conn.(*net.TCPConn).SetKeepAlivePeriod(10*time.Second)
 
 	client = NewConnected(conn)
 

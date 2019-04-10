@@ -8,6 +8,7 @@ import (
 	"io"
 	"net"
 	"sync"
+	"time"
 )
 
 // The agent of job server.
@@ -47,6 +48,7 @@ func (a *agent) Connect() (err error) {
 	//a.conn = kaConn
 
 	a.conn.(*net.TCPConn).SetKeepAlive(true)
+	a.conn.(*net.TCPConn).SetKeepAlivePeriod(10*time.Second)
 
 	a.rw = bufio.NewReadWriter(bufio.NewReader(a.conn),
 		bufio.NewWriter(a.conn))
@@ -173,6 +175,7 @@ func (a *agent) reconnect() error {
 	a.conn = conn
 
 	a.conn.(*net.TCPConn).SetKeepAlive(true)
+	a.conn.(*net.TCPConn).SetKeepAlivePeriod(10*time.Second)
 
 	//kaConn, _ := tcpkeepalive.EnableKeepAlive(a.conn)
 	//kaConn.SetKeepAliveIdle(100000*time.Second)
