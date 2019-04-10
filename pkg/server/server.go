@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"github.com/felixge/tcpkeepalive"
 	"net"
 	"net/http"
 	"strconv"
@@ -166,17 +167,12 @@ func (s *Server) Start() {
 			continue
 		}
 
-		keepAliveError :=conn.(*net.TCPConn).SetKeepAlive(true)
-		if keepAliveError!=nil {
-			log.Errorln("Can not set up keep-alive call for agent")
-			return
-		}
+		kaConn, _ := tcpkeepalive.EnableKeepAlive(conn)
+		kaConn.SetKeepAliveIdle(30*time.Second)
+		kaConn.SetKeepAliveCount(100)
+		kaConn.SetKeepAliveInterval(10*time.Second)
 
-		keepAlivePeriodError :=conn.(*net.TCPConn).SetKeepAlivePeriod(50*time.Second)
-		if keepAlivePeriodError!=nil {
-			log.Errorln("Can not set up keep-alive period for agent")
-			return
-		}
+		conn = *kaConn
 
 		session := &session{}
 		go session.handleConnection(s, conn)

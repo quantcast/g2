@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"github.com/appscode/go/log"
+	"github.com/felixge/tcpkeepalive"
 	rt "github.com/quantcast/g2/pkg/runtime"
 	"io"
 	"net"
@@ -60,22 +61,14 @@ func newAgent(net, addr string, worker *Worker) (a *agent, err error) {
 //	}
 //}
 
-func (a *agent) SetKeepAlive(keepAlive bool) (err error){
-	if keepAlive {
-		//set up keep-alive for agent
-		keepAliveError :=a.conn.(*net.TCPConn).SetKeepAlive(true)
-		if keepAliveError!=nil {
-			log.Errorln("Can not set up keep-alive call for agent")
-			return keepAliveError
-		}
+func (a *agent) SetKeepAlive(keepAlive bool) (err error) {
+	kaConn, error := tcpkeepalive.EnableKeepAlive(a.conn)
+	kaConn.SetKeepAliveIdle(30*time.Second)
+	kaConn.SetKeepAliveCount(100)
+	kaConn.SetKeepAliveInterval(10*time.Second)
+	a.conn = *kaConn
 
-		keepAlivePeriodError :=a.conn.(*net.TCPConn).SetKeepAlivePeriod(30*time.Second)
-		if keepAlivePeriodError!=nil {
-			log.Errorln("Can not set up keep-alive period for agent")
-			return keepAliveError
-		}
-	}
-	return nil
+	return error
 }
 
 
@@ -91,7 +84,7 @@ func (a *agent) Connect() (err error) {
 
 	keepAliveError := a.SetKeepAlive(true)
 	if keepAliveError!=nil {
-		log.Errorln("Failed make agent connection keep-alived")
+		log.Errorln("Failed to set up keep-alive")
 	}
 	log.Infoln("Agent Set keep-alive successfully ")
 
@@ -221,7 +214,7 @@ func (a *agent) reconnect() error {
 
 	keepAliveError := a.SetKeepAlive(true)
 	if keepAliveError!=nil {
-		log.Errorln("Failed make agent connection keep-alived")
+		log.Errorln("Failed to set up keep-alive for agent")
 	}
 	log.Infoln("Agent Set keep-alive successfully ")
 

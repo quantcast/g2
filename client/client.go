@@ -7,6 +7,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"github.com/felixge/tcpkeepalive"
 	"io"
 	"net"
 	"strings"
@@ -52,21 +53,6 @@ type Client struct {
 	ErrorHandler ErrorHandler
 }
 
-func setKeepAlive(keepAlive bool, conn net.Conn) (err error){
-	if keepAlive {
-		//set up keep-alive for agent
-		keepAliveError :=conn.(*net.TCPConn).SetKeepAlive(true)
-		if keepAliveError!=nil {
-			return keepAliveError
-		}
-
-		keepAlivePeriodError :=conn.(*net.TCPConn).SetKeepAlivePeriod(30*time.Second)
-		if keepAlivePeriodError!=nil {
-			return keepAliveError
-		}
-	}
-	return nil
-}
 
 // Return a client.
 func New(network, addr string) (client *Client, err error) {
@@ -78,13 +64,12 @@ func New(network, addr string) (client *Client, err error) {
 		return
 	}
 
-	setKeepAliveError := setKeepAlive(true, conn)
-	if setKeepAliveError!=nil {
-		log.Errorln("Can not set up keep-alive for client")
-	}
-	log.Infoln("Set keep-alive successfully for client")
+	kaConn, _ := tcpkeepalive.EnableKeepAlive(conn)
+	kaConn.SetKeepAliveIdle(30*time.Second)
+	kaConn.SetKeepAliveCount(100)
+	kaConn.SetKeepAliveInterval(10*time.Second)
 
-	client = NewConnected(conn)
+	client = NewConnected(*kaConn)
 
 	//sender(conn.(*net.TCPConn))
 
@@ -228,11 +213,11 @@ func (client *Client) reconnect(err error) error {
 		return err
 	}
 
-	setKeepAliveError := setKeepAlive(true, conn)
-	if setKeepAliveError!=nil {
-		log.Errorln("Can not set up keep-alive for client")
-	}
-	log.Infoln("Set keep-alive successfully for client")
+	kaConn, _ := tcpkeepalive.EnableKeepAlive(conn)
+	kaConn.SetKeepAliveIdle(30*time.Second)
+	kaConn.SetKeepAliveCount(100)
+	kaConn.SetKeepAliveInterval(10*time.Second)
+	client.conn.Conn = *kaConn
 
 	swapped := atomic.CompareAndSwapPointer(
 		(*unsafe.Pointer)(unsafe.Pointer(&client.conn)),
