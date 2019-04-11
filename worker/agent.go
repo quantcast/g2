@@ -47,7 +47,7 @@ func (a *agent) Connect() (err error) {
 
 	for t := range ticker {
 		log.Infoln("Sent Heart Beat ", t)
-		a.conn.Write([]byte{0})
+		a.conn.Read([]byte{0})
 	}
 
 	a.rw = bufio.NewReadWriter(bufio.NewReader(a.conn),
