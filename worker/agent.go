@@ -214,6 +214,7 @@ func (a *agent) Connect() {
 		_ = conn.Close()
 		time.Sleep(3 * time.Second)
 
+		// todo: come up with a more reliable way to determine if we have a working connection to gearman, pehaps by performing a test
 		conn, err = net.Dial(a.net, a.addr)
 		if err != nil {
 			// looks like there is another problem, go back to the main loop

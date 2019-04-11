@@ -87,6 +87,7 @@ func NewNetClient(network, addr string) (client *Client, err error) {
 			_ = conn.Close()
 			time.Sleep(3 * time.Second)
 
+			// todo: come up with a more reliable way to determine if we have a working connection to gearman, pehaps by performing a test
 			conn, err = net.Dial(network, addr)
 			if err != nil {
 				// looks like there is another problem, go back to the main loop
@@ -147,6 +148,18 @@ func (client *Client) getConn() *connection {
 	return client.conn
 }
 
+func (client *Client) writeReconnectCleanup(cleanupHandle func(), ibufs ...[]byte) error {
+	for _, ibuf := range ibufs {
+		if _, err := client.getConn().Write(ibuf); err != nil {
+			if err = client.reconnect(err); err != nil {
+				cleanupHandle()
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 func (client *Client) writeLoop() {
 	ibuf := make([]byte, 4)
 	length := uint32(0)
@@ -157,18 +170,19 @@ func (client *Client) writeLoop() {
 	// writeLoop lives in a separate goroutine.
 	for req := range client.channels.outbound {
 
-		if _, err := client.getConn().Write([]byte(rt.ReqStr)); err != nil {
-			if err = client.reconnect(err); err != nil {
-				break
-			}
+		reqLoc := req // need a copy for the anonymous function
+		cleanupHandle := func() {
+			client.requestPool.Put(reqLoc)
+		}
+
+		if err := client.writeReconnectCleanup(cleanupHandle, []byte(rt.ReqStr)); err != nil {
+			return
 		}
 
 		binary.BigEndian.PutUint32(ibuf, req.pt.Uint32())
 
-		if _, err := client.getConn().Write(ibuf); err != nil {
-			if err = client.reconnect(err); err != nil {
-				break
-			}
+		if err := client.writeReconnectCleanup(cleanupHandle, ibuf); err != nil {
+			return
 		}
 
 		length = 0
@@ -182,33 +196,17 @@ func (client *Client) writeLoop() {
 
 		binary.BigEndian.PutUint32(ibuf, length)
 
-		if _, err := client.getConn().Write(ibuf); err != nil {
-			if err = client.reconnect(err); err != nil {
-				break
-			}
-		}
-
-		if _, err := client.getConn().Write(req.data[0]); err != nil {
-			if err = client.reconnect(err); err != nil {
-				break
-			}
+		if err := client.writeReconnectCleanup(cleanupHandle, ibuf, req.data[0]); err != nil {
+			return
 		}
 
 		for i = 1; i < len(req.data); i++ {
-			if _, err := client.getConn().Write(NullBytes); err != nil {
-				if err = client.reconnect(err); err != nil {
-					break
-				}
-			}
-
-			if _, err := client.getConn().Write(req.data[i]); err != nil {
-				if err = client.reconnect(err); err != nil {
-					break
-				}
+			if err := client.writeReconnectCleanup(cleanupHandle, NullBytes, req.data[i]); err != nil {
+				return
 			}
 		}
 
-		client.requestPool.Put(req)
+		cleanupHandle()
 	}
 }
 

@@ -189,12 +189,6 @@ func (worker *Worker) Ready() (err error) {
 		go a.Connect()
 	}
 
-	// `once` protects registering worker functions multiple times.
-	//	worker.once.Do(func() {
-	//		for funcname, f := range worker.funcs {
-	//			worker.addFunc(funcname, f.timeout)
-	//		}
-	//	})
 	worker.ready = true
 	return
 }
