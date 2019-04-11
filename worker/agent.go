@@ -43,11 +43,11 @@ func (a *agent) Connect() (err error) {
 		return
 	}
 
-	ticker := time.Tick(8*time.Second)
+	ticker := time.Tick(5*time.Second)
 
 	for t := range ticker {
-		log.Infoln("Refreshing Connection By Heart Beat ", t)
-		a.conn, err = net.Dial(a.net, a.addr)
+		log.Infoln("Sent Heart Beat ", t)
+		a.conn.Write([]byte{0})
 	}
 
 	a.rw = bufio.NewReadWriter(bufio.NewReader(a.conn),

@@ -63,16 +63,14 @@ func New(network, addr string) (client *Client, err error) {
 		return
 	}
 
-	ticker := time.Tick(8*time.Second)
-
-	for t := range ticker {
-		log.Infoln("Refresh Connection Heart Beat", t)
-		conn, err = net.Dial(network, addr)
-	}
-
 	client = NewConnected(conn)
 
+	ticker := time.Tick(5*time.Second)
 
+	for t := range ticker {
+		log.Infoln("Sent Heart Beat", t)
+		client.Echo([]byte{0})
+	}
 	return
 }
 
@@ -184,12 +182,6 @@ func (client *Client) reconnect(err error) error {
 		client.err(err)
 		return err
 	}
-
-	//kaConn, _ := tcpkeepalive.EnableKeepAlive(conn)
-	//kaConn.SetKeepAliveIdle(30*time.Second)
-	//kaConn.SetKeepAliveCount(100)
-	//kaConn.SetKeepAliveInterval(10*time.Second)
-	//client.conn.Conn = *kaConn
 
 	swapped := atomic.CompareAndSwapPointer(
 		(*unsafe.Pointer)(unsafe.Pointer(&client.conn)),
