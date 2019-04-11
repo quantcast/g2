@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"strings"
 	"sync"
@@ -15,7 +16,6 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/appscode/go/log"
 	rt "github.com/quantcast/g2/pkg/runtime"
 )
 
@@ -69,11 +69,11 @@ type Client struct {
 func NewNetClient(network, addr string) (client *Client, err error) {
 
 	handlerConnOpen := func() (conn net.Conn, err error) {
-		log.Infof("Trying to connect to server %v ...", addr)
+		log.Printf("Trying to connect to server %v ...", addr)
 		for {
 			for num_tries := 1; ; num_tries++ {
 				if num_tries%100 == 0 {
-					log.Warningf("Still trying to connect to server %v, attempt# %v ...", addr, num_tries)
+					log.Printf("Still trying to connect to server %v, attempt# %v ...", addr, num_tries)
 				}
 				conn, err = net.Dial(network, addr)
 				if err != nil {
@@ -97,7 +97,7 @@ func NewNetClient(network, addr string) (client *Client, err error) {
 
 			break
 		}
-		log.Infof("Connected to server %v", addr)
+		log.Printf("Connected to server %v", addr)
 
 		return
 	}
@@ -113,7 +113,7 @@ func NewClient(handleConnClose ConnCloseHandler,
 
 	conn, err := handleConnOpen()
 	if err != nil {
-		log.Errorf("Failed to create new client, error: %v", err)
+		log.Printf("ERROR: Failed to create new client, error: %v", err)
 		return nil
 	}
 
@@ -262,9 +262,9 @@ func (client *Client) reconnect(err error) error {
 	close(client.channels.expected)
 	close(client.channels.outbound)
 
-	log.Warningf("Closing connection to %v due to error %v, will reconnect...", client.addr, err)
+	log.Printf("Closing connection to %v due to error %v, will reconnect...", client.addr, err)
 	if close_err := client.Close(); close_err != nil {
-		log.Warningf("Non-fatal error %v, while closing connection to %v", close_err, client.addr)
+		log.Printf("Non-fatal error %v, while closing connection to %v", close_err, client.addr)
 	}
 
 	conn, err := client.handleConnOpen()
@@ -363,7 +363,7 @@ func (client *Client) process(resp *Response) {
 	// terminally should return it here.
 	switch resp.DataType {
 	case rt.PT_Error:
-		log.Errorln("Received error", resp.Data)
+		log.Println("Received error", resp.Data)
 
 		client.err(getError(resp.Data))
 
@@ -377,15 +377,14 @@ func (client *Client) process(resp *Response) {
 	case rt.PT_WorkData, rt.PT_WorkWarning, rt.PT_WorkStatus:
 		// These alternate conditions should not happen so long as
 		// everyone is following the specification.
-		log.Infof("process(): got %v for handle %v", resp.DataType, resp.Handle)
 		if handler, ok := client.handlers.Load(resp.Handle); ok {
 			if h, ok := handler.(ResponseHandler); ok {
 				h(resp)
 			} else {
-				log.Warningf("Could not cast handler to ResponseHandler for %v", resp.Handle)
+				log.Printf("Could not cast handler to ResponseHandler for %v", resp.Handle)
 			}
 		} else {
-			log.Warningf("unexpected %s response for \"%s\" with no handler", resp.DataType, resp.Handle)
+			log.Printf("unexpected %s response for \"%s\" with no handler", resp.DataType, resp.Handle)
 		}
 
 		client.responsePool.Put(resp)
@@ -442,8 +441,6 @@ func (client *Client) Do(funcname string, payload []byte,
 	handle, err = client.submit(pt, funcname, payload)
 
 	client.handlers.Store(handle, h)
-
-	log.Infof("submit(): got handle %v for job %v", handle, funcname)
 
 	return
 }
