@@ -56,6 +56,7 @@ func New(limit int) (worker *Worker) {
 	if limit != Unlimited {
 		worker.limit = make(chan bool, limit-1)
 	}
+
 	return
 }
 
@@ -68,10 +69,10 @@ func (worker *Worker) err(e error) {
 
 //heartbeat fuc
 func (w *Worker) heartBeat() {
-	ticker := time.Tick(9*time.Second)
+	ticker := time.Tick(30*time.Second)
 	for t := range ticker {
-		log.Infoln("Sent Heart Beat Client ", t)
-		fmt.Println("Boom")
+		log.Infoln("Sent Heart Beat worker ", t)
+		fmt.Println("TikTok")
 		w.Echo([]byte{0})
 	}
 }
@@ -86,8 +87,6 @@ func (worker *Worker) AddServer(net, addr string) (err error) {
 		return err
 	}
 	worker.agents = append(worker.agents, a)
-
-	go worker.heartBeat()
 
 	return
 }
@@ -212,6 +211,7 @@ func (worker *Worker) Ready() (err error) {
 		}
 	})
 	worker.ready = true
+
 	return
 }
 

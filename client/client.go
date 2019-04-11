@@ -55,9 +55,10 @@ type Client struct {
 }
 
 func (client *Client) heartBeat() {
-	ticker := time.Tick(8*time.Second)
+	ticker := time.Tick(30*time.Second)
 	for t := range ticker {
 		log.Infoln("Sent Heart Beat Client ", t)
+		fmt.Println("TikTok")
 		client.Echo([]byte{0})
 	}
 }
@@ -335,6 +336,8 @@ func (client *Client) Do(funcname string, payload []byte,
 	}
 
 	handle, err = client.submit(pt, funcname, payload)
+
+	client.handlers.Store(handle, h)
 
 	return
 }
