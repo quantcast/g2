@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/binary"
+	"fmt"
 	"github.com/appscode/go/log"
 	rt "github.com/quantcast/g2/pkg/runtime"
 	"io"
@@ -34,10 +35,12 @@ func newAgent(net, addr string, worker *Worker) (a *agent, err error) {
 }
 
 func (a *agent) heartBeat() {
-	ticker := time.Tick(8*time.Second)
+	ticker := time.Tick(9*time.Second)
 	for t := range ticker {
 		log.Infoln("Sent Heart Beat Client ", t)
-		a.conn.Write([]byte{0})
+		fmt.Println("Boom")
+		a.conn.Close()
+		a.reconnect()
 	}
 }
 
@@ -126,12 +129,6 @@ func (a *agent) work() {
 			}
 		}
 	}
-
-	//ticker := time.Tick(8*time.Second)
-	//for t := range ticker {
-	//	log.Infoln("Sent Heart Beat Agent ", t)
-	//	fmt.Println("Heart Beat Client")
-	//}
 }
 
 func (a *agent) disconnect_error(err error) {
