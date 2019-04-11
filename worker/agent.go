@@ -4,13 +4,10 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/binary"
-	"fmt"
-	"github.com/appscode/go/log"
 	rt "github.com/quantcast/g2/pkg/runtime"
 	"io"
 	"net"
 	"sync"
-	"time"
 )
 
 // The agent of job server.
@@ -34,16 +31,6 @@ func newAgent(net, addr string, worker *Worker) (a *agent, err error) {
 	return
 }
 
-func (a *agent) heartBeat() {
-	ticker := time.Tick(9*time.Second)
-	for t := range ticker {
-		log.Infoln("Sent Heart Beat Client ", t)
-		fmt.Println("Boom")
-		a.conn.Close()
-		a.reconnect()
-	}
-}
-
 
 func (a *agent) Connect() (err error) {
 	a.Lock()
@@ -57,7 +44,6 @@ func (a *agent) Connect() (err error) {
 		bufio.NewWriter(a.conn))
 
 	go a.work()
-	go a.heartBeat()
 
 	return
 }

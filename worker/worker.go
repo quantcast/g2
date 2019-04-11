@@ -5,6 +5,7 @@ package worker
 import (
 	"encoding/binary"
 	"fmt"
+	"github.com/appscode/go/log"
 	"sync"
 	"time"
 
@@ -65,6 +66,16 @@ func (worker *Worker) err(e error) {
 	}
 }
 
+//heartbeat fuc
+func (w *Worker) heartBeat() {
+	ticker := time.Tick(9*time.Second)
+	for t := range ticker {
+		log.Infoln("Sent Heart Beat Client ", t)
+		fmt.Println("Boom")
+		w.Echo([]byte{0})
+	}
+}
+
 // Add a Gearman job server.
 //
 // addr should be formatted as 'host:port'.
@@ -75,6 +86,9 @@ func (worker *Worker) AddServer(net, addr string) (err error) {
 		return err
 	}
 	worker.agents = append(worker.agents, a)
+
+	go worker.heartBeat()
+
 	return
 }
 
