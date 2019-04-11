@@ -6,7 +6,6 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
-	"github.com/felixge/tcpkeepalive"
 	"net"
 	"net/http"
 	"strconv"
@@ -15,13 +14,13 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/appscode/go/log"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/quantcast/g2/pkg/metrics"
 	. "github.com/quantcast/g2/pkg/runtime"
 	"github.com/quantcast/g2/pkg/storage"
 	"github.com/quantcast/g2/pkg/storage/leveldb"
-	"github.com/appscode/go/log"
-	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
 	lberror "github.com/syndtr/goleveldb/leveldb/errors"
 	"gopkg.in/robfig/cron.v2"
 )
@@ -166,14 +165,6 @@ func (s *Server) Start() {
 		if err != nil { // handle error
 			continue
 		}
-
-		kaConn, _ := tcpkeepalive.EnableKeepAlive(conn)
-		kaConn.SetKeepAliveIdle(30*time.Second)
-		kaConn.SetKeepAliveCount(100)
-		kaConn.SetKeepAliveInterval(10*time.Second)
-
-		conn = *kaConn
-
 		session := &session{}
 		go session.handleConnection(s, conn)
 	}

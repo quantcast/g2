@@ -63,15 +63,18 @@ func New(network, addr string) (client *Client, err error) {
 		return
 	}
 
-	ticker := time.Tick(8*time.Second)
 
-	for t := range ticker {
-		log.Infoln("Refresh Connection Heart Beat", t)
-		conn, err = net.Dial(network, addr)
-	}
 
 	client = NewConnected(conn)
 
+	ticker := time.Tick(5*time.Second)
+
+	for t := range ticker {
+		log.Infoln("Heart Beat", t)
+		test :=[]byte{0}
+		fmt.Println("Sent Heart Beat ", test)
+		client.Echo(test)
+	}
 
 	return
 }
@@ -93,6 +96,8 @@ func NewConnected(conn net.Conn) (client *Client) {
 		responsePool:    &sync.Pool{New: func() interface{} { return &Response{} }},
 		requestPool:     &sync.Pool{New: func() interface{} { return &request{} }},
 	}
+
+
 
 
 	go client.readLoop()
