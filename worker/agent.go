@@ -33,6 +33,13 @@ func newAgent(net, addr string, worker *Worker) (a *agent, err error) {
 	return
 }
 
+func (a *agent) heartBeat() {
+	ticker := time.Tick(8*time.Second)
+	for t := range ticker {
+		log.Infoln("Sent Heart Beat Client ", t)
+		a.conn.Write([]byte{0})
+	}
+}
 
 
 func (a *agent) Connect() (err error) {
@@ -47,14 +54,7 @@ func (a *agent) Connect() (err error) {
 		bufio.NewWriter(a.conn))
 
 	go a.work()
-
-	ticker := time.Tick(8*time.Second)
-
-	for t := range ticker {
-		log.Infoln("Sent Heart Beat Agent ", t)
-		a.conn, err = net.Dial(a.net, a.addr)
-	}
-
+	go a.heartBeat()
 
 	return
 }
@@ -126,6 +126,12 @@ func (a *agent) work() {
 			}
 		}
 	}
+
+	//ticker := time.Tick(8*time.Second)
+	//for t := range ticker {
+	//	log.Infoln("Sent Heart Beat Agent ", t)
+	//	fmt.Println("Heart Beat Client")
+	//}
 }
 
 func (a *agent) disconnect_error(err error) {

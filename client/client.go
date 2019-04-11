@@ -34,6 +34,8 @@ type connection struct {
 	net.Conn
 }
 
+
+
 // One client connect to one server.
 // Use Pool for multi-connections.
 type Client struct {
@@ -52,6 +54,14 @@ type Client struct {
 	ErrorHandler ErrorHandler
 }
 
+func (client *Client) heartBeat() {
+	ticker := time.Tick(8*time.Second)
+	for t := range ticker {
+		log.Infoln("Sent Heart Beat Client ", t)
+		client.Echo([]byte{0})
+	}
+}
+
 
 // Return a client.
 func New(network, addr string) (client *Client, err error) {
@@ -61,15 +71,10 @@ func New(network, addr string) (client *Client, err error) {
 	}
 	client = NewConnected(conn)
 
-	ticker := time.Tick(8*time.Second)
+	go client.heartBeat()
 
-	for t := range ticker {
-		log.Infoln("Sent Heart Beat Client ", t)
-		client.Echo([]byte{0})
-	}
 	return
 }
-
 
 // Return a new client from an established connection. Largely used for
 // testing, though other use-cases can be imagined.
@@ -330,8 +335,6 @@ func (client *Client) Do(funcname string, payload []byte,
 	}
 
 	handle, err = client.submit(pt, funcname, payload)
-
-	client.handlers.Store(handle, h)
 
 	return
 }
