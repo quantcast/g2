@@ -157,13 +157,14 @@ func (worker *Worker) handleInPack(inpack *inPack) {
 			if err := worker.exec(inpack); err != nil {
 				log.Printf("ERROR %v in handleInPack(server: %v, job %v), discarding the results because cannot send them back to gearman", err, inpack.a.addr, inpack.handle)
 				inpack.a.Connect()
+			} else {
+				if !worker.isShuttingDown() {
+					inpack.a.Grab()
+				}
 			}
 		}()
 		if worker.limit != nil {
 			worker.limit <- true
-		}
-		if !worker.isShuttingDown() {
-			inpack.a.Grab()
 		}
 	case rt.PT_Error:
 		worker.err(inpack.Err())

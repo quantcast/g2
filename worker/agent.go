@@ -113,6 +113,9 @@ func (a *agent) reconnect_error(err error) {
 }
 
 func (a *agent) Close() {
+	if a.conn == nil {
+		return
+	}
 	a.Lock()
 	defer a.Unlock()
 	if a.conn != nil {
@@ -122,6 +125,9 @@ func (a *agent) Close() {
 }
 
 func (a *agent) Grab() (err error) {
+	if a.conn == nil {
+		return errors.New("No connection")
+	}
 	a.Lock()
 	defer a.Unlock()
 	return a.grab()
@@ -134,6 +140,9 @@ func (a *agent) grab() (err error) {
 }
 
 func (a *agent) PreSleep() (err error) {
+	if a.conn == nil {
+		return errors.New("No connection")
+	}
 	a.Lock()
 	defer a.Unlock()
 	outpack := getOutPack()
