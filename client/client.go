@@ -55,20 +55,16 @@ type Client struct {
 
 // Return a client.
 func New(network, addr string) (client *Client, err error) {
-
 	conn, err := net.Dial(network, addr)
-
-
 	if err != nil {
 		return
 	}
-
 	client = NewConnected(conn)
 
-	ticker := time.Tick(5*time.Second)
+	ticker := time.Tick(8*time.Second)
 
 	for t := range ticker {
-		log.Infoln("Sent Heart Beat", t)
+		log.Infoln("Sent Heart Beat Client ", t)
 		client.Echo([]byte{0})
 	}
 	return
