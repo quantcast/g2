@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"net"
 	"strings"
 	"sync"
@@ -60,20 +59,40 @@ type Client struct {
 
 	ResponseTimeout time.Duration
 
-	ErrorHandler    ErrorHandler
-	handleConnClose ConnCloseHandler
-	handleConnOpen  ConnOpenHandler
+	ErrorHandler     ErrorHandler
+	connCloseHandler ConnCloseHandler
+	connOpenHandler  ConnOpenHandler
+	logHandler       LogHandler
+}
+
+type LogLevel int
+
+const (
+	Error   LogLevel = 0
+	Warning LogLevel = 1
+	Info    LogLevel = 2
+	Debug   LogLevel = 3
+)
+
+type LogHandler func(level LogLevel, message ...string)
+
+func (client *Client) Log(level LogLevel, message ...string) {
+	if client.logHandler != nil {
+		client.logHandler(level, message...)
+	}
 }
 
 // Return a client.
-func NewNetClient(network, addr string) (client *Client, err error) {
+func NewNetClient(network, addr string, logHandler LogHandler) (client *Client, err error) {
 
-	handlerConnOpen := func() (conn net.Conn, err error) {
-		log.Printf("Trying to connect to server %v ...", addr)
+	connOpenHandler := func() (conn net.Conn, err error) {
+		if logHandler != nil {
+			logHandler(Info, fmt.Sprintf("Trying to connect to server %v ...", addr))
+		}
 		for {
 			for num_tries := 1; ; num_tries++ {
-				if num_tries%100 == 0 {
-					log.Printf("Still trying to connect to server %v, attempt# %v ...", addr, num_tries)
+				if num_tries%100 == 0 && logHandler != nil {
+					logHandler(Info, fmt.Sprintf("Still trying to connect to server %v, attempt# %v ...", addr, num_tries))
 				}
 				conn, err = net.Dial(network, addr)
 				if err != nil {
@@ -98,38 +117,43 @@ func NewNetClient(network, addr string) (client *Client, err error) {
 
 			break
 		}
-		log.Printf("Connected to server %v", addr)
+		if logHandler != nil {
+			logHandler(Info, fmt.Sprintf("Connected to server %v", addr))
+		}
 
 		return
 	}
 
-	client = NewClient(nil, handlerConnOpen)
+	client, err = NewClient(nil, connOpenHandler, logHandler)
 
 	return
 }
 
 /// handler_conn_close: optional
-func NewClient(handleConnClose ConnCloseHandler,
-	handleConnOpen ConnOpenHandler) (client *Client) {
+func NewClient(connCloseHandler ConnCloseHandler,
+	connOpenHandler ConnOpenHandler,
+	logHandler LogHandler) (client *Client, err error) {
 
-	conn, err := handleConnOpen()
+	conn, err := connOpenHandler()
 	if err != nil {
-		log.Printf("ERROR: Failed to create new client, error: %v", err)
-		return nil
+		// if we're emitting errors we wont log them, they can be logged by the codebase that's using this client
+		err = errors.New(fmt.Sprintf("Failed to create new client: %v", err))
+		return
 	}
 
 	addr := conn.RemoteAddr()
 
 	client = &Client{
-		net:             addr.Network(),
-		addr:            addr.String(),
-		conn:            &connection{Conn: conn},
-		channels:        &chanStruct{expected: make(chan *Response), outbound: make(chan *request)},
-		ResponseTimeout: DefaultTimeout,
-		responsePool:    &sync.Pool{New: func() interface{} { return &Response{} }},
-		requestPool:     &sync.Pool{New: func() interface{} { return &request{} }},
-		handleConnClose: handleConnClose,
-		handleConnOpen:  handleConnOpen,
+		net:              addr.Network(),
+		addr:             addr.String(),
+		conn:             &connection{Conn: conn},
+		channels:         &chanStruct{expected: make(chan *Response), outbound: make(chan *request)},
+		ResponseTimeout:  DefaultTimeout,
+		responsePool:     &sync.Pool{New: func() interface{} { return &Response{} }},
+		requestPool:      &sync.Pool{New: func() interface{} { return &request{} }},
+		connCloseHandler: connCloseHandler,
+		connOpenHandler:  connOpenHandler,
+		logHandler:       logHandler,
 	}
 
 	go client.readLoop()
@@ -260,12 +284,12 @@ func (client *Client) reconnect(err error) error {
 	close(client.channels.expected)
 	close(client.channels.outbound)
 
-	log.Printf("Closing connection to %v due to error %v, will reconnect...", client.addr, err)
+	client.Log(Error, fmt.Sprintf("Closing connection to %v due to error %v, will reconnect...", client.addr, err))
 	if close_err := client.Close(); close_err != nil {
-		log.Printf("Non-fatal error %v, while closing connection to %v", close_err, client.addr)
+		client.Log(Warning, fmt.Sprintf("Non-fatal error %v, while closing connection to %v", close_err, client.addr))
 	}
 
-	conn, err := client.handleConnOpen()
+	conn, err := client.connOpenHandler()
 	if err != nil {
 		return err
 	}
@@ -361,7 +385,6 @@ func (client *Client) process(resp *Response) {
 	// terminally should return it here.
 	switch resp.DataType {
 	case rt.PT_Error:
-		log.Println("Received error", resp.Data)
 
 		client.err(getError(resp.Data))
 
@@ -379,10 +402,10 @@ func (client *Client) process(resp *Response) {
 			if h, ok := handler.(ResponseHandler); ok {
 				h(resp)
 			} else {
-				log.Printf("Could not cast handler to ResponseHandler for %v", resp.Handle)
+				client.err(errors.New(fmt.Sprintf("Could not cast handler to ResponseHandler for %v", resp.Handle)))
 			}
 		} else {
-			log.Printf("unexpected %s response for \"%s\" with no handler", resp.DataType, resp.Handle)
+			client.err(errors.New(fmt.Sprintf("unexpected %s response for \"%s\" with no handler", resp.DataType, resp.Handle)))
 		}
 
 		client.responsePool.Put(resp)
@@ -562,8 +585,8 @@ func (client *Client) Close() (err error) {
 	conn := (*connection)(ptr)
 
 	if conn != nil {
-		if client.handleConnClose != nil {
-			err = client.handleConnClose(conn)
+		if client.connCloseHandler != nil {
+			err = client.connCloseHandler(conn)
 		} else {
 			err = conn.Close()
 		}

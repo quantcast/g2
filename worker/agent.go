@@ -5,7 +5,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"errors"
-	"log"
+	"fmt"
 	"net"
 	"sync"
 	"sync/atomic"
@@ -40,7 +40,7 @@ func newAgent(net, addr string, worker *Worker) (a *agent, err error) {
 }
 
 func (a *agent) work() {
-	log.Println("Starting agent Work For:", a.addr)
+	a.worker.Log(Info, "Starting agent Work For:", a.addr)
 	defer func() {
 		if err := recover(); err != nil {
 			a.reconnect_error(err.(error))
@@ -59,16 +59,16 @@ func (a *agent) work() {
 		if data, err = a.read(); err != nil {
 			if opErr, ok := err.(*net.OpError); ok {
 				if opErr.Temporary() {
-					log.Println("opErr.Temporary():", a.addr)
+					a.worker.Log(Info, "opErr.Temporary():", a.addr)
 					continue
 				} else {
-					log.Println("got permanent network error with server:", a.addr, "comm thread exiting.")
+					a.worker.Log(Info, "got permanent network error with server:", a.addr, "comm thread exiting.")
 					a.reconnect_error(err)
 					// else - we're probably dc'ing due to a Close()
 					break
 				}
 			} else {
-				log.Println("got error", err, "with server:", a.addr, "comm thread exiting...")
+				a.worker.Log(Info, "got error", err.Error(), "with server:", a.addr, "comm thread exiting...")
 				a.reconnect_error(err)
 				break
 			}
@@ -109,7 +109,6 @@ func (a *agent) reconnect_error(err error) {
 		a.worker.err(err)
 	}
 	a.Connect()
-
 }
 
 func (a *agent) Close() {
@@ -177,7 +176,7 @@ func (a *agent) Connect() {
 	}
 	defer a.resetReconnectState() // before releasing client lock we will reset reconnection state
 
-	log.Println("Trying to Connect to server:", a.addr, "...")
+	a.worker.Log(Info, "Trying to Connect to server:", a.addr, "...")
 
 	var conn net.Conn
 	var err error
@@ -194,7 +193,7 @@ func (a *agent) Connect() {
 			_ = atomic.SwapPointer((*unsafe.Pointer)(unsafe.Pointer(&a.rw)), nil)
 
 			if num_tries%100 == 0 {
-				log.Printf("Still trying to connect to server %v, attempt# %v ...", a.addr, num_tries)
+				a.worker.Log(Info, fmt.Sprintf("Still trying to connect to server %v, attempt# %v ...", a.addr, num_tries))
 			}
 			conn, err = net.Dial(a.net, a.addr)
 			if err != nil {
@@ -222,30 +221,28 @@ func (a *agent) Connect() {
 			continue
 		}
 
-		if err = conn.(*net.TCPConn).SetKeepAlive(true); err != nil {
-			log.Println("Error callng SetKeepAlive for %, ingoring...", a.addr)
-		}
+		_ = conn.(*net.TCPConn).SetKeepAlive(true)
 
 		a.conn = conn
 		a.connectionVersion++
 
-		log.Println("Successfully Connected to:", a.addr)
+		a.worker.Log(Info, "Successfully Connected to:", a.addr)
 
 		newRw := bufio.NewReadWriter(bufio.NewReader(a.conn), bufio.NewWriter(a.conn))
 
 		if swapped := atomic.CompareAndSwapPointer(
 			(*unsafe.Pointer)(unsafe.Pointer(&a.rw)),
 			unsafe.Pointer(nil), unsafe.Pointer(newRw)); !swapped {
-			log.Println("Was expecting nil when replacing with new ReadWriter")
+			a.worker.Log(Warning, fmt.Sprintf("Was expecting nil when replacing with new ReadWriter, server: %v", a.addr))
 		}
 
 		if err := a.worker.reRegisterFuncsForAgent(a); err != nil {
-			log.Println("Failed to register funcs for agent, error=%v", err)
+			a.worker.Log(Error, fmt.Sprintf("Failed to register funcs for agent, error=%v, will reconnect...", err))
 			continue
 		}
 
 		if err := a.grab(); err != nil {
-			log.Println("Failed to grab(), error=%v", err)
+			a.worker.Log(Error, fmt.Sprintf("Failed to request a new job assignment, error=%v, will reconnect", err))
 			continue
 		}
 

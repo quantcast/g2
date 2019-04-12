@@ -34,13 +34,27 @@ func Foobar(job worker.Job) ([]byte, error) {
 	return job.Data(), nil
 }
 
+func logHandler(level worker.LogLevel, message ...string) {
+	switch level {
+	case worker.Error:
+		log.Println("Error:", message)
+	case worker.Warning:
+		log.Println("Warning", message)
+	case worker.Info:
+		log.Println("Info:", message)
+	case worker.Debug:
+		log.Println("Debug", message)
+	}
+}
+
 func main() {
 	log.Println("Starting ...")
 	defer log.Println("Shutdown complete!")
-	w := worker.New(worker.Unlimited)
+
+	w := worker.New(worker.Unlimited, logHandler)
 	defer w.Close()
 	w.ErrorHandler = func(e error) {
-		log.Println("Error occurred in worker:", e)
+		log.Println("ErrorHandler Received:", e)
 
 		if opErr, ok := e.(*net.OpError); ok {
 			if !opErr.Temporary() {
@@ -54,6 +68,7 @@ func main() {
 			}
 		}
 	}
+
 	w.JobHandler = func(job worker.Job) error {
 		log.Printf("Data=%s\n", job.Data())
 		return nil

@@ -2,12 +2,24 @@ package main
 
 import (
 	"log"
-	"os"
 	"time"
 
 	"github.com/quantcast/g2/client"
 	rt "github.com/quantcast/g2/pkg/runtime"
 )
+
+func logHandler(level client.LogLevel, message ...string) {
+	switch level {
+	case client.Error:
+		log.Println("Error:", message)
+	case client.Warning:
+		log.Println("Warning", message)
+	case client.Info:
+		log.Println("Info:", message)
+	case client.Debug:
+		log.Println("Debug", message)
+	}
+}
 
 func main() {
 	// Set the autoinc id generator
@@ -23,15 +35,15 @@ func main() {
 	}
 	defer c.Close()
 	c.ErrorHandler = func(e error) {
-		log.Println("Error:", e)
-		os.Exit(1)
+		log.Println("ErrorHandler Received:", e)
 	}
 	echo := []byte("Hello\x00 world")
 	echomsg, err := c.Echo(echo)
 	if err != nil {
-		log.Fatalln("Fatal Error", err)
+		log.Printf("Error in Echo:", err)
+	} else {
+		log.Println("EchoMsg:", string(echomsg))
 	}
-	log.Println("EchoMsg:", string(echomsg))
 
 	print_result := true
 	print_update := false

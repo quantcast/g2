@@ -5,7 +5,6 @@ package worker
 import (
 	"encoding/binary"
 	"fmt"
-	"log"
 	"sync"
 	"time"
 
@@ -16,6 +15,17 @@ const (
 	Unlimited = iota
 	OneByOne
 )
+
+type LogLevel int
+
+const (
+	Error   LogLevel = 0
+	Warning LogLevel = 1
+	Info    LogLevel = 2
+	Debug   LogLevel = 3
+)
+
+type LogHandler func(level LogLevel, message ...string)
 
 // Worker is the only structure needed by worker side developing.
 // It can connect to multi-server and grab jobs.
@@ -35,6 +45,13 @@ type Worker struct {
 	ErrorHandler ErrorHandler
 	JobHandler   JobHandler
 	limit        chan bool
+	logHandler   LogHandler
+}
+
+func (worker *Worker) Log(level LogLevel, message ...string) {
+	if worker.logHandler != nil {
+		worker.logHandler(level, message...)
+	}
 }
 
 // Return a worker.
@@ -44,11 +61,12 @@ type Worker struct {
 // If limit is greater than zero, the number of paralled executing
 // jobs are limited under the number. If limit is assigned to
 // OneByOne(=1), there will be only one job executed in a time.
-func New(limit int) (worker *Worker) {
+func New(limit int, logHandler LogHandler) (worker *Worker) {
 	worker = &Worker{
-		agents: make([]*agent, 0, limit),
-		funcs:  make(jobFuncs),
-		in:     make(chan *inPack, rt.QueueSize),
+		agents:     make([]*agent, 0, limit),
+		funcs:      make(jobFuncs),
+		in:         make(chan *inPack, rt.QueueSize),
+		logHandler: logHandler,
 	}
 	if limit != Unlimited {
 		worker.limit = make(chan bool, limit-1)
@@ -155,7 +173,7 @@ func (worker *Worker) handleInPack(inpack *inPack) {
 	case rt.PT_JobAssign, rt.PT_JobAssignUniq:
 		go func() {
 			if err := worker.exec(inpack); err != nil {
-				log.Printf("ERROR %v in handleInPack(server: %v, job %v), discarding the results because cannot send them back to gearman", err, inpack.a.addr, inpack.handle)
+				worker.Log(Error, fmt.Sprintf("ERROR %v in handleInPack(server: %v, job %v), discarding the results because cannot send them back to gearman", err, inpack.a.addr, inpack.handle))
 				inpack.a.Connect()
 			} else {
 				if !worker.isShuttingDown() {
