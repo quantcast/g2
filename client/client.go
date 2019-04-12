@@ -45,7 +45,6 @@ type ConnOpenHandler func() (conn net.Conn, err error)
 // One client connect to one server.
 // Use Pool for multi-connections.
 type Client struct {
-	sync.Mutex
 	reconnectLock      sync.Mutex
 	reconnectingActive bool
 	net, addr          string
@@ -166,21 +165,20 @@ func (client *Client) IsConnectionSet() bool {
 	return client.conn != nil
 }
 
-func (client *Client) getConn() *connection {
-	client.Lock()
-	defer client.Unlock()
-	return client.conn
-}
-
-func (client *Client) writeReconnectCleanup(cleanupHandle func(), ibufs ...[]byte) error {
+func (client *Client) writeReconnectCleanup(cleanupHandle func(), ibufs ...[]byte) (exit bool) {
 	for _, ibuf := range ibufs {
-		if _, err := client.getConn().Write(ibuf); err != nil {
+		conn := client.conn
+		if conn == nil {
+			// means we are already in the process of reconnecting
+			return true
+		}
+		if _, err := conn.Write(ibuf); err != nil {
 			cleanupHandle()
 			go client.reconnect(err)
-			return err // return non-nil will cause writeLoop to exit, it will be restarted upon successful reconnect
+			return true // return true will cause writeLoop to exit, it will be restarted upon successful reconnect
 		}
 	}
-	return nil
+	return false
 }
 
 func (client *Client) writeLoop() {
@@ -197,13 +195,13 @@ func (client *Client) writeLoop() {
 			client.requestPool.Put(req)
 		}
 
-		if err := client.writeReconnectCleanup(cleanupHandle, []byte(rt.ReqStr)); err != nil {
+		if exit := client.writeReconnectCleanup(cleanupHandle, []byte(rt.ReqStr)); exit {
 			return
 		}
 
 		binary.BigEndian.PutUint32(ibuf, req.pt.Uint32())
 
-		if err := client.writeReconnectCleanup(cleanupHandle, ibuf); err != nil {
+		if exit := client.writeReconnectCleanup(cleanupHandle, ibuf); exit {
 			return
 		}
 
@@ -218,12 +216,12 @@ func (client *Client) writeLoop() {
 
 		binary.BigEndian.PutUint32(ibuf, length)
 
-		if err := client.writeReconnectCleanup(cleanupHandle, ibuf, req.data[0]); err != nil {
+		if exit := client.writeReconnectCleanup(cleanupHandle, ibuf, req.data[0]); exit {
 			return
 		}
 
 		for i = 1; i < len(req.data); i++ {
-			if err := client.writeReconnectCleanup(cleanupHandle, NullBytes, req.data[i]); err != nil {
+			if exit := client.writeReconnectCleanup(cleanupHandle, NullBytes, req.data[i]); exit {
 				return
 			}
 		}
@@ -268,9 +266,6 @@ func (client *Client) reconnect(err error) error {
 
 	ownReconnect := client.grabReconnectState()
 
-	client.Lock()
-	defer client.Unlock()
-
 	if !ownReconnect {
 		//Reconnect collision, this thread will exit and wait on next client.Lock() for other to complete reconnection
 		return nil
@@ -306,10 +301,24 @@ func (client *Client) reconnect(err error) error {
 			expected: make(chan *Response),
 			outbound: make(chan *request)}))
 
-	// writeLoop() will be dead because the channel has been closed, it can be restarted now
+	go client.readLoop()
 	go client.writeLoop()
 
 	return nil
+}
+
+func (client *Client) readReconnect(buf []byte) (n int, exit bool) {
+	conn := client.conn
+	if conn == nil {
+		return 0, true
+	}
+	var err error
+	if n, err = io.ReadFull(conn, buf); err != nil {
+		go client.reconnect(err)
+		return 0, true
+	} else {
+		return n, false
+	}
 }
 
 func (client *Client) readLoop() {
@@ -320,24 +329,16 @@ func (client *Client) readLoop() {
 
 	for client.conn != nil {
 
-		if _, err = io.ReadFull(client.getConn(), header); err != nil {
-			if err = client.reconnect(err); err != nil {
-				break
-			}
-
-			continue
+		if _, exit := client.readReconnect(header); exit {
+			return
 		}
 
 		_, pt, length := decodeHeader(header)
 
 		contents := make([]byte, length)
 
-		if _, err = io.ReadFull(client.getConn(), contents); err != nil {
-			if err = client.reconnect(err); err != nil {
-				break
-			}
-
-			continue
+		if _, exit := client.readReconnect(contents); exit {
+			return
 		}
 
 		resp = client.responsePool.Get().(*Response)
@@ -376,6 +377,7 @@ func (client *Client) readLoop() {
 
 		client.process(resp)
 	}
+
 }
 
 func (client *Client) process(resp *Response) {
