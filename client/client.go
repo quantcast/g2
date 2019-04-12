@@ -175,10 +175,9 @@ func (client *Client) getConn() *connection {
 func (client *Client) writeReconnectCleanup(cleanupHandle func(), ibufs ...[]byte) error {
 	for _, ibuf := range ibufs {
 		if _, err := client.getConn().Write(ibuf); err != nil {
-			if err = client.reconnect(err); err != nil {
-				cleanupHandle()
-				return err
-			}
+			cleanupHandle()
+			go client.reconnect(err)
+			return err // return non-nil will cause writeLoop to exit, it will be restarted upon successful reconnect
 		}
 	}
 	return nil
@@ -194,9 +193,8 @@ func (client *Client) writeLoop() {
 	// writeLoop lives in a separate goroutine.
 	for req := range client.channels.outbound {
 
-		reqLoc := req // need a copy for the anonymous function
 		cleanupHandle := func() {
-			client.requestPool.Put(reqLoc)
+			client.requestPool.Put(req)
 		}
 
 		if err := client.writeReconnectCleanup(cleanupHandle, []byte(rt.ReqStr)); err != nil {
@@ -291,6 +289,7 @@ func (client *Client) reconnect(err error) error {
 
 	conn, err := client.connOpenHandler()
 	if err != nil {
+		client.err(err)
 		return err
 	}
 
@@ -415,6 +414,8 @@ func (client *Client) process(resp *Response) {
 func (client *Client) err(e error) {
 	if client.ErrorHandler != nil {
 		client.ErrorHandler(e)
+	} else {
+		client.Log(Error, e.Error()) // in case ErrorHandler is not supplied we try the Log, this might be important
 	}
 }
 
