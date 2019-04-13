@@ -85,6 +85,12 @@ func main() {
 		return
 	}
 	go w.Work()
+
+	ticker := time.Tick(10 * time.Second)
+	for _ = range ticker {
+		activeJobs := w.GetActiveJobCount()
+		log.Printf("Current job count: %v", activeJobs)
+	}
 	signal.Bind(os.Interrupt, func() uint { return signal.BreakExit })
 	signal.Wait()
 }

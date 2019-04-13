@@ -127,8 +127,6 @@ func (a *agent) Grab() (err error) {
 	if a.conn == nil {
 		return errors.New("No connection")
 	}
-	a.Lock()
-	defer a.Unlock()
 	return a.grab()
 }
 
@@ -142,8 +140,6 @@ func (a *agent) PreSleep() (err error) {
 	if a.conn == nil {
 		return errors.New("No connection")
 	}
-	a.Lock()
-	defer a.Unlock()
 	outpack := getOutPack()
 	outpack.dataType = rt.PT_PreSleep
 	return a.Write(outpack)
@@ -167,8 +163,6 @@ func (a *agent) resetReconnectState() {
 func (a *agent) Connect() {
 
 	ownReconnect := a.grabReconnectState()
-	a.Lock()
-	defer a.Unlock()
 
 	if !ownReconnect {
 		//Reconnect collision, this thread will exit and wait on next a.Lock() for other to complete reconnection
@@ -290,6 +284,8 @@ func (a *agent) Write(outpack *outPack) (err error) {
 	if a.rw == nil {
 		return errors.New("Reconnect is active, discarding the response")
 	}
+	a.Lock()
+	defer a.Unlock()
 
 	var n int
 	buf := outpack.Encode()

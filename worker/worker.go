@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	rt "github.com/quantcast/g2/pkg/runtime"
@@ -39,7 +40,8 @@ type Worker struct {
 	// The shuttingDown variable is protected by the Worker lock
 	shuttingDown bool
 	// Used during shutdown to wait for all active jobs to finish
-	activeJobs sync.WaitGroup
+	activeJobs      sync.WaitGroup
+	activeJobsCount int32
 
 	Id           string
 	ErrorHandler ErrorHandler
@@ -52,6 +54,10 @@ func (worker *Worker) Log(level LogLevel, message ...string) {
 	if worker.logHandler != nil {
 		worker.logHandler(level, message...)
 	}
+}
+
+func (worker *Worker) GetActiveJobCount() int32 {
+	return atomic.LoadInt32(&worker.activeJobsCount)
 }
 
 // Return a worker.
@@ -165,24 +171,23 @@ func (worker *Worker) removeFunc(funcname string) {
 func (worker *Worker) handleInPack(inpack *inPack) {
 	switch inpack.dataType {
 	case rt.PT_NoJob:
-		inpack.a.PreSleep()
+		_ = inpack.a.PreSleep()
 	case rt.PT_Noop:
 		if !worker.isShuttingDown() {
-			inpack.a.Grab()
+			_ = inpack.a.Grab()
 		}
 	case rt.PT_JobAssign, rt.PT_JobAssignUniq:
 		go func() {
 			if err := worker.exec(inpack); err != nil {
 				worker.Log(Error, fmt.Sprintf("ERROR %v in handleInPack(server: %v, job %v), discarding the results because cannot send them back to gearman", err, inpack.a.addr, inpack.handle))
 				inpack.a.Connect()
-			} else {
-				if !worker.isShuttingDown() {
-					inpack.a.Grab()
-				}
 			}
 		}()
 		if worker.limit != nil {
 			worker.limit <- true
+		}
+		if !worker.isShuttingDown() {
+			_ = inpack.a.Grab()
 		}
 	case rt.PT_Error:
 		worker.err(inpack.Err())
@@ -293,9 +298,8 @@ func (worker *Worker) SetId(id string) {
 func (worker *Worker) exec(inpack *inPack) (err error) {
 	defer func() {
 		// decrement job counter in completion of this job
-		worker.Lock()
 		worker.activeJobs.Done()
-		worker.Unlock()
+		atomic.AddInt32(&worker.activeJobsCount, -1)
 		if worker.limit != nil {
 			<-worker.limit
 		}
@@ -308,6 +312,7 @@ func (worker *Worker) exec(inpack *inPack) (err error) {
 		}
 	}()
 	worker.activeJobs.Add(1)
+	atomic.AddInt32(&worker.activeJobsCount, 1)
 	if worker.isShuttingDown() {
 		return
 	}
