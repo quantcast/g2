@@ -34,24 +34,19 @@ type connection struct {
 	connVersion int
 }
 
-type chanStruct struct {
-	outbound chan *request
-	expected chan *Response
-}
-
 type ConnCloseHandler func(conn net.Conn) (err error)
 type ConnOpenHandler func() (conn net.Conn, err error)
 
 // One client connect to one server.
 // Use Pool for multi-connections.
 type Client struct {
-	reconnectLock      sync.Mutex
-	reconnectingActive bool
-	net, addr          string
-	handlers           sync.Map
-	conn               *connection
+	reconnectState uint32
+	net, addr      string
+	handlers       sync.Map
+	conn           *connection
 	//rw        *bufio.ReadWriter
-	channels *chanStruct
+	outbound chan *request
+	expected chan *Response
 
 	responsePool *sync.Pool
 	requestPool  *sync.Pool
@@ -81,21 +76,44 @@ func (client *Client) Log(level LogLevel, message ...string) {
 	}
 }
 
-// Return a client.
-func NewNetClient(network, addr string, logHandler LogHandler) (client *Client, err error) {
+func NewConnected(conn net.Conn) (client *Client) {
+
+	existingConnection := &connection{conn, 0}
 
 	connOpenHandler := func() (conn net.Conn, err error) {
-		if logHandler != nil {
-			logHandler(Info, fmt.Sprintf("Trying to connect to server %v ...", addr))
+		if existingConnection != nil {
+			conn = existingConnection.Conn
+			existingConnection = nil
+		} else {
+			err = errors.New("Connection supplied to NewConnected() failed")
 		}
+		return
+	}
+
+	client, _ = NewClient(nil, connOpenHandler, nil)
+
+	return client
+}
+
+// Return a client.
+func New(network, addr string, logHandler LogHandler) (client *Client, err error) {
+
+	if logHandler == nil {
+		logHandler = func(level LogLevel, message ...string) {}
+	}
+
+	retryPeriod := 3 * time.Second
+
+	connOpenHandler := func() (conn net.Conn, err error) {
+		logHandler(Info, fmt.Sprintf("Trying to connect to server %v ...", addr))
 		for {
-			for num_tries := 1; ; num_tries++ {
-				if num_tries%100 == 0 && logHandler != nil {
-					logHandler(Info, fmt.Sprintf("Still trying to connect to server %v, attempt# %v ...", addr, num_tries))
+			for numTries := 1; ; numTries++ {
+				if numTries%100 == 0 {
+					logHandler(Info, fmt.Sprintf("Still trying to connect to server %v, attempt# %v ...", addr, numTries))
 				}
 				conn, err = net.Dial(network, addr)
 				if err != nil {
-					time.Sleep(time.Second)
+					time.Sleep(retryPeriod)
 					continue
 				}
 				break
@@ -103,22 +121,20 @@ func NewNetClient(network, addr string, logHandler LogHandler) (client *Client, 
 			// at this point the server is back online, we will disconnect and reconnect again to make sure that we don't have
 			// one of those dud connections which could happen if we've reconnected to gearman too quickly after it started
 			_ = conn.Close()
-			time.Sleep(3 * time.Second)
+			time.Sleep(retryPeriod)
 
 			// todo: come up with a more reliable way to determine if we have a working connection to gearman, pehaps by performing a test
 			conn, err = net.Dial(network, addr)
 			if err != nil {
 				// looks like there is another problem, go back to the main loop
-				time.Sleep(time.Second)
+				time.Sleep(retryPeriod)
 				continue
 			}
-			conn.(*net.TCPConn).SetKeepAlive(true)
+			_ = conn.(*net.TCPConn).SetKeepAlive(true)
 
 			break
 		}
-		if logHandler != nil {
-			logHandler(Info, fmt.Sprintf("Connected to server %v", addr))
-		}
+		logHandler(Info, fmt.Sprintf("Connected to server %v", addr))
 
 		return
 	}
@@ -146,7 +162,8 @@ func NewClient(connCloseHandler ConnCloseHandler,
 		net:              addr.Network(),
 		addr:             addr.String(),
 		conn:             &connection{Conn: conn},
-		channels:         &chanStruct{expected: make(chan *Response), outbound: make(chan *request)},
+		expected:         make(chan *Response),
+		outbound:         make(chan *request),
 		ResponseTimeout:  DefaultTimeout,
 		responsePool:     &sync.Pool{New: func() interface{} { return &Response{} }},
 		requestPool:      &sync.Pool{New: func() interface{} { return &request{} }},
@@ -162,18 +179,18 @@ func NewClient(connCloseHandler ConnCloseHandler,
 }
 
 func (client *Client) IsConnectionSet() bool {
-	return client.conn != nil
+	return client.loadConn() != nil
 }
 
-func (client *Client) writeReconnectCleanup(cleanupHandle func(), ibufs ...[]byte) (exit bool) {
+func (client *Client) writeReconnectCleanup(req *request, ibufs ...[]byte) bool {
 	for _, ibuf := range ibufs {
-		conn := client.conn
+		conn := client.loadConn()
 		if conn == nil {
 			// means we are already in the process of reconnecting
 			return true
 		}
 		if _, err := conn.Write(ibuf); err != nil {
-			cleanupHandle()
+			client.requestPool.Put(req)
 			go client.reconnect(err)
 			return true // return true will cause writeLoop to exit, it will be restarted upon successful reconnect
 		}
@@ -189,19 +206,15 @@ func (client *Client) writeLoop() {
 	// Pipeline requests; but only write them one at a time. To allow multiple
 	// goroutines to all write as quickly as possible, uses a channel and the
 	// writeLoop lives in a separate goroutine.
-	for req := range client.channels.outbound {
+	for req := range client.outbound {
 
-		cleanupHandle := func() {
-			client.requestPool.Put(req)
-		}
-
-		if exit := client.writeReconnectCleanup(cleanupHandle, []byte(rt.ReqStr)); exit {
+		if exit := client.writeReconnectCleanup(req, []byte(rt.ReqStr)); exit {
 			return
 		}
 
 		binary.BigEndian.PutUint32(ibuf, req.pt.Uint32())
 
-		if exit := client.writeReconnectCleanup(cleanupHandle, ibuf); exit {
+		if exit := client.writeReconnectCleanup(req, ibuf); exit {
 			return
 		}
 
@@ -216,17 +229,17 @@ func (client *Client) writeLoop() {
 
 		binary.BigEndian.PutUint32(ibuf, length)
 
-		if exit := client.writeReconnectCleanup(cleanupHandle, ibuf, req.data[0]); exit {
+		if client.writeReconnectCleanup(req, ibuf, req.data[0]) {
 			return
 		}
 
 		for i = 1; i < len(req.data); i++ {
-			if exit := client.writeReconnectCleanup(cleanupHandle, NullBytes, req.data[i]); exit {
+			if exit := client.writeReconnectCleanup(req, NullBytes, req.data[i]); exit {
 				return
 			}
 		}
 
-		cleanupHandle()
+		client.requestPool.Put(req)
 	}
 }
 
@@ -238,19 +251,13 @@ func decodeHeader(header []byte) (code []byte, pt uint32, length int) {
 	return
 }
 
-func (client *Client) grabReconnectState() (success bool) {
-	client.reconnectLock.Lock()
-	defer client.reconnectLock.Unlock()
-	if client.reconnectingActive { // another thread is already reconnecting to server, this thread will exit
-		return false
-	}
-	client.reconnectingActive = true // I am first to attempt reconnection
-	return true
+func (client *Client) lockReconnect() (success bool) {
+	return atomic.CompareAndSwapUint32(&client.reconnectState, 0, 1)
 }
 
 // called by owner of reconnect state to tell that it has finished reconnecting
 func (client *Client) resetReconnectState() {
-	client.reconnectingActive = false
+	atomic.StoreUint32(&client.reconnectState, 0)
 }
 
 func (client *Client) reconnect(err error) error {
@@ -264,7 +271,7 @@ func (client *Client) reconnect(err error) error {
 		}
 	}
 
-	ownReconnect := client.grabReconnectState()
+	ownReconnect := client.lockReconnect()
 
 	if !ownReconnect {
 		//Reconnect collision, this thread will exit and wait on next client.Lock() for other to complete reconnection
@@ -273,9 +280,9 @@ func (client *Client) reconnect(err error) error {
 
 	defer client.resetReconnectState() // before releasing client lock we will reset reconnection state
 
-	connVersion := client.conn.connVersion
-	close(client.channels.expected)
-	close(client.channels.outbound)
+	connVersion := client.loadConn().connVersion
+	close(client.expected)
+	close(client.outbound)
 
 	client.Log(Error, fmt.Sprintf("Closing connection to %v due to error %v, will reconnect...", client.addr, err))
 	if close_err := client.Close(); close_err != nil {
@@ -296,10 +303,8 @@ func (client *Client) reconnect(err error) error {
 		return errors.New("Was expecting nil when replacing with new connection")
 	}
 
-	_ = atomic.SwapPointer((*unsafe.Pointer)(unsafe.Pointer(&client.channels)),
-		unsafe.Pointer(&chanStruct{
-			expected: make(chan *Response),
-			outbound: make(chan *request)}))
+	client.expected = make(chan *Response)
+	client.outbound = make(chan *request)
 
 	go client.readLoop()
 	go client.writeLoop()
@@ -307,15 +312,19 @@ func (client *Client) reconnect(err error) error {
 	return nil
 }
 
+func (client *Client) loadConn() *connection {
+	return (*connection)(atomic.LoadPointer((*unsafe.Pointer)(unsafe.Pointer(&client.conn))))
+}
+
 func (client *Client) readReconnect(buf []byte) (n int, exit bool) {
-	conn := client.conn
+	conn := client.loadConn()
 	if conn == nil {
 		return 0, true
 	}
 	var err error
 	if n, err = io.ReadFull(conn, buf); err != nil {
 		go client.reconnect(err)
-		return 0, true
+		return n, true
 	} else {
 		return n, false
 	}
@@ -327,7 +336,7 @@ func (client *Client) readLoop() {
 	var err error
 	var resp *Response
 
-	for client.conn != nil {
+	for client.loadConn() != nil {
 
 		if _, exit := client.readReconnect(header); exit {
 			return
@@ -389,10 +398,10 @@ func (client *Client) process(resp *Response) {
 
 		client.err(getError(resp.Data))
 
-		client.channels.expected <- resp
+		client.expected <- resp
 
 	case rt.PT_StatusRes, rt.PT_JobCreated, rt.PT_EchoRes:
-		client.channels.expected <- resp
+		client.expected <- resp
 	case rt.PT_WorkComplete, rt.PT_WorkFail, rt.PT_WorkException:
 		defer client.handlers.Delete(resp.Handle)
 		fallthrough
@@ -428,15 +437,15 @@ func (client *Client) request() *request {
 func (client *Client) submit(pt rt.PT, funcname string, payload []byte) (handle string, err error) {
 
 	defer func() {
-		if e := recover(); e != nil {
-			handle = ""
-			err = e.(error)
+		if e := safeCastError(recover(), "panic in submit()"); e != nil {
+			err = e
 		}
 	}()
 
-	client.channels.outbound <- client.request().submitJob(pt, funcname, IdGen.Id(), payload)
+	client.outbound <- client.request().submitJob(pt, funcname, IdGen.Id(), payload)
 
-	if res := <-client.channels.expected; res != nil {
+	if res := <-client.expected; res != nil {
+		var err error
 		if res.DataType == rt.PT_Error {
 			err = getError(res.Data)
 		}
@@ -444,7 +453,7 @@ func (client *Client) submit(pt rt.PT, funcname string, payload []byte) (handle 
 		return res.Handle, err
 	}
 
-	return "", errors.New("Got empty client.channels queue, please resubmit your message")
+	return "", errors.New("Channels are closed, please resubmit your message")
 }
 
 // Call the function and get a response.
@@ -522,7 +531,7 @@ func (client *Client) doCron(funcname string, cronExpr string, funcParam []byte)
 }
 
 func (client *Client) DoAt(funcname string, epoch int64, funcParam []byte) (handle string, err error) {
-	if client.conn == nil {
+	if client.loadConn() == nil {
 		return "", ErrLostConn
 	}
 
@@ -537,15 +546,14 @@ func (client *Client) DoAt(funcname string, epoch int64, funcParam []byte) (hand
 func (client *Client) Status(handle string) (status *Status, err error) {
 
 	defer func() {
-		if e := recover(); e != nil {
-			status = nil
-			err = e.(error)
+		if e := safeCastError(recover(), "panic in Status"); e != nil {
+			err = e
 		}
 	}()
 
-	client.channels.outbound <- client.request().status(handle)
+	client.outbound <- client.request().status(handle)
 
-	res := <-client.channels.expected
+	res := <-client.expected
 
 	if res == nil {
 		return nil, errors.New("Status response queue is empty, please resend")
@@ -553,22 +561,22 @@ func (client *Client) Status(handle string) (status *Status, err error) {
 	status, err = res.Status()
 
 	client.responsePool.Put(res)
-	return status, nil
+
+	return
 }
 
 // Echo.
 func (client *Client) Echo(data []byte) (echo []byte, err error) {
 
 	defer func() {
-		if e := recover(); e != nil {
-			echo = nil
-			err = e.(error)
+		if e := safeCastError(recover(), "panic in Echo"); e != nil {
+			err = e
 		}
 	}()
 
-	client.channels.outbound <- client.request().echo(data)
+	client.outbound <- client.request().echo(data)
 
-	res := <-client.channels.expected
+	res := <-client.expected
 
 	if res == nil {
 		return nil, errors.New("Echo request got empty response, please resend")

@@ -42,8 +42,8 @@ func newAgent(net, addr string, worker *Worker) (a *agent, err error) {
 func (a *agent) work() {
 	a.worker.Log(Info, "Starting agent Work For:", a.addr)
 	defer func() {
-		if err := recover(); err != nil {
-			a.reconnect_error(err.(error))
+		if err := safeCastError(recover(), "panic in work()"); err != nil {
+			a.reconnect_error(err)
 		}
 	}()
 

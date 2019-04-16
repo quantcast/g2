@@ -106,7 +106,7 @@ go w.Work()
 ## Client
 
 ```go
-c, err := client.NewNetClient("tcp4", "127.0.0.1:4730")
+c, err := client.New("tcp4", "127.0.0.1:4730")
 defer c.Close()
 //error handling
 c.ErrorHandler = func(e error) {

@@ -67,17 +67,21 @@ func (worker *Worker) GetActiveJobCount() int32 {
 // If limit is greater than zero, the number of paralled executing
 // jobs are limited under the number. If limit is assigned to
 // OneByOne(=1), there will be only one job executed in a time.
-func New(limit int, logHandler LogHandler) (worker *Worker) {
+func New(limit int) (worker *Worker) {
 	worker = &Worker{
 		agents:     make([]*agent, 0, limit),
 		funcs:      make(jobFuncs),
 		in:         make(chan *inPack, rt.QueueSize),
-		logHandler: logHandler,
+		logHandler: nil,
 	}
 	if limit != Unlimited {
 		worker.limit = make(chan bool, limit-1)
 	}
 	return
+}
+
+func (worker *Worker) SetLogHandler(logHandler LogHandler) {
+	worker.logHandler = logHandler
 }
 
 // inner error handling
