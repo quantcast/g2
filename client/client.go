@@ -130,7 +130,6 @@ func New(network, addr string, logHandler LogHandler) (client *Client, err error
 				time.Sleep(retryPeriod)
 				continue
 			}
-			_ = conn.(*net.TCPConn).SetKeepAlive(true)
 
 			break
 		}

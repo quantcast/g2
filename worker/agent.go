@@ -18,14 +18,13 @@ import (
 // The agent of job server.
 type agent struct {
 	sync.Mutex
-	reconnectLock      sync.Mutex
-	reconnectingActive bool
-	conn               net.Conn
-	connectionVersion  uint32
-	rw                 *bufio.ReadWriter
-	worker             *Worker
-	in                 chan []byte
-	net, addr          string
+	reconnectState    uint32
+	conn              net.Conn
+	connectionVersion uint32
+	rw                *bufio.ReadWriter
+	worker            *Worker
+	in                chan []byte
+	net, addr         string
 }
 
 // Create the agent of job server.
@@ -37,6 +36,10 @@ func newAgent(net, addr string, worker *Worker) (a *agent, err error) {
 		in:     make(chan []byte, rt.QueueSize),
 	}
 	return
+}
+
+func (a *agent) loadRw() *bufio.ReadWriter {
+	return (*bufio.ReadWriter)(atomic.LoadPointer((*unsafe.Pointer)(unsafe.Pointer(&a.rw))))
 }
 
 func (a *agent) work() {
@@ -51,10 +54,10 @@ func (a *agent) work() {
 	var l int
 	var err error
 	var data, leftdata []byte
-	startConnVersion := a.connectionVersion
+	startRw := a.loadRw()
 
 	// exit the loop if connection has been replaced because reconnect will launch a new work() thread
-	for startConnVersion == a.connectionVersion && !a.worker.isShuttingDown() {
+	for startRw == a.loadRw() && !a.worker.isShuttingDown() {
 
 		if data, err = a.read(); err != nil {
 			if opErr, ok := err.(*net.OpError); ok {
@@ -130,7 +133,7 @@ func (a *agent) Grab() (err error) {
 	return a.grab()
 }
 
-func (a *agent) grab() (err error) {
+func (a *agent) grab() error {
 	outpack := getOutPack()
 	outpack.dataType = rt.PT_GrabJobUniq
 	return a.Write(outpack)
@@ -145,24 +148,18 @@ func (a *agent) PreSleep() (err error) {
 	return a.Write(outpack)
 }
 
-func (a *agent) grabReconnectState() (success bool) {
-	a.reconnectLock.Lock()
-	defer a.reconnectLock.Unlock()
-	if a.reconnectingActive { // another thread is already reconnecting to server, this thread will exit
-		return false
-	}
-	a.reconnectingActive = true // I am first to attempt reconnection
-	return true
+func (a *agent) lockReconnect() (success bool) {
+	return atomic.CompareAndSwapUint32(&a.reconnectState, 0, 1)
 }
 
 // called by owner of reconnect state to tell that it has finished reconnecting
 func (a *agent) resetReconnectState() {
-	a.reconnectingActive = false
+	atomic.StoreUint32(&a.reconnectState, 0)
 }
 
 func (a *agent) Connect() {
 
-	ownReconnect := a.grabReconnectState()
+	ownReconnect := a.lockReconnect()
 
 	if !ownReconnect {
 		//Reconnect collision, this thread will exit and wait on next a.Lock() for other to complete reconnection
@@ -215,8 +212,6 @@ func (a *agent) Connect() {
 			continue
 		}
 
-		_ = conn.(*net.TCPConn).SetKeepAlive(true)
-
 		a.conn = conn
 		a.connectionVersion++
 
@@ -258,8 +253,9 @@ func (a *agent) read() (data []byte, err error) {
 	tmp := rt.NewBuffer(rt.BufferSize)
 	var buf bytes.Buffer
 
+	myRw := a.loadRw()
 	// read the header so we can get the length of the data
-	if n, err = a.rw.Read(tmp); err != nil {
+	if n, err = myRw.Read(tmp); err != nil {
 		return
 	}
 	dl := int(binary.BigEndian.Uint32(tmp[8:12]))
@@ -269,7 +265,7 @@ func (a *agent) read() (data []byte, err error) {
 
 	// read until we receive all the data
 	for buf.Len() < dl+rt.MinPacketLength {
-		if n, err = a.rw.Read(tmp); err != nil {
+		if n, err = myRw.Read(tmp); err != nil {
 			return buf.Bytes(), err
 		}
 		buf.Write(tmp[:n])
@@ -281,7 +277,8 @@ func (a *agent) read() (data []byte, err error) {
 // Internal write the encoded job.
 func (a *agent) Write(outpack *outPack) (err error) {
 
-	if a.rw == nil {
+	myRw := a.loadRw()
+	if myRw == nil {
 		return errors.New("Reconnect is active, discarding the response")
 	}
 	a.Lock()
@@ -290,10 +287,10 @@ func (a *agent) Write(outpack *outPack) (err error) {
 	var n int
 	buf := outpack.Encode()
 	for i := 0; i < len(buf); i += n {
-		n, err = a.rw.Write(buf[i:])
+		n, err = myRw.Write(buf[i:])
 		if err != nil {
 			return err
 		}
 	}
-	return a.rw.Flush()
+	return myRw.Flush()
 }
