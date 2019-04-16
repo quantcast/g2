@@ -316,9 +316,9 @@ func (client *Client) loadConn() *connection {
 	return (*connection)(atomic.LoadPointer((*unsafe.Pointer)(unsafe.Pointer(&client.conn))))
 }
 
-func (client *Client) readReconnect(buf []byte) (n int, exit bool) {
+func (client *Client) readReconnect(startConn *connection, buf []byte) (n int, exit bool) {
 	conn := client.loadConn()
-	if conn == nil {
+	if startConn != conn {
 		return 0, true
 	}
 	var err error
@@ -335,10 +335,11 @@ func (client *Client) readLoop() {
 
 	var err error
 	var resp *Response
+	startConn := client.loadConn()
 
-	for client.loadConn() != nil {
+	for startConn == client.loadConn() {
 
-		if _, exit := client.readReconnect(header); exit {
+		if _, exit := client.readReconnect(startConn, header); exit {
 			return
 		}
 
@@ -346,7 +347,7 @@ func (client *Client) readLoop() {
 
 		contents := make([]byte, length)
 
-		if _, exit := client.readReconnect(contents); exit {
+		if _, exit := client.readReconnect(startConn, contents); exit {
 			return
 		}
 
