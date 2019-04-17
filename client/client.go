@@ -181,13 +181,8 @@ func (client *Client) IsConnectionSet() bool {
 	return client.loadConn() != nil
 }
 
-func (client *Client) writeReconnectCleanup(req *request, ibufs ...[]byte) bool {
+func (client *Client) writeReconnectCleanup(conn *connection, req *request, ibufs ...[]byte) bool {
 	for _, ibuf := range ibufs {
-		conn := client.loadConn()
-		if conn == nil {
-			// means we are already in the process of reconnecting
-			return true
-		}
 		if _, err := conn.Write(ibuf); err != nil {
 			client.requestPool.Put(req)
 			go client.reconnect(err)
@@ -207,13 +202,19 @@ func (client *Client) writeLoop() {
 	// writeLoop lives in a separate goroutine.
 	for req := range client.outbound {
 
-		if exit := client.writeReconnectCleanup(req, []byte(rt.ReqStr)); exit {
+		conn := client.loadConn()
+		if conn == nil {
+			client.requestPool.Put(req)
+			return
+		}
+
+		if exit := client.writeReconnectCleanup(conn, req, []byte(rt.ReqStr)); exit {
 			return
 		}
 
 		binary.BigEndian.PutUint32(ibuf, req.pt.Uint32())
 
-		if exit := client.writeReconnectCleanup(req, ibuf); exit {
+		if exit := client.writeReconnectCleanup(conn, req, ibuf); exit {
 			return
 		}
 
@@ -228,12 +229,12 @@ func (client *Client) writeLoop() {
 
 		binary.BigEndian.PutUint32(ibuf, length)
 
-		if client.writeReconnectCleanup(req, ibuf, req.data[0]) {
+		if client.writeReconnectCleanup(conn, req, ibuf, req.data[0]) {
 			return
 		}
 
 		for i = 1; i < len(req.data); i++ {
-			if exit := client.writeReconnectCleanup(req, NullBytes, req.data[i]); exit {
+			if exit := client.writeReconnectCleanup(conn, req, NullBytes, req.data[i]); exit {
 				return
 			}
 		}

@@ -51,7 +51,9 @@ func main() {
 	log.Println("Starting ...")
 	defer log.Println("Shutdown complete!")
 
-	w := worker.New(worker.Unlimited, logHandler)
+	w := worker.New(worker.Unlimited)
+	w.SetLogHandler(logHandler)
+
 	defer w.Close()
 	w.ErrorHandler = func(e error) {
 		log.Println("ErrorHandler Received:", e)
