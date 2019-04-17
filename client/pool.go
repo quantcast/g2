@@ -75,7 +75,7 @@ func (pool *Pool) Add(net, addr string, rate int) (err error) {
 		item.Rate = rate
 	} else {
 		var client *Client
-		client, err = New(net, addr)
+		client, err = New(net, addr, nil)
 		if err == nil {
 			item = &PoolClient{Client: client, Rate: rate}
 			pool.Clients[addr] = item

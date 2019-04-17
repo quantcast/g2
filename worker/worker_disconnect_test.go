@@ -225,7 +225,7 @@ func TestDcRc(t *testing.T) {
 }
 
 func send_client_request() {
-	c, err := client.New(rt.Network, "127.0.0.1:"+port)
+	c, err := client.New(rt.Network, "127.0.0.1:"+port, nil)
 	if err == nil {
 		_, err = c.DoBg("gearman-go-workertest", []byte{}, rt.JobHigh)
 		if err != nil {

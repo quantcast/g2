@@ -26,3 +26,13 @@ func getError(data []byte) (err error) {
 
 // An error handler
 type ErrorHandler func(error)
+
+func safeCastError(e interface{}, defaultMessage string) error {
+	if e == nil {
+		return nil
+	}
+	if err, ok := e.(error); ok {
+		return err
+	}
+	return errors.New(defaultMessage)
+}

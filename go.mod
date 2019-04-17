@@ -4,7 +4,9 @@ require (
 	github.com/appscode/go v0.0.0-20180628092646-df3c57fca2be
 	github.com/appscode/pat v0.0.0-20170521084856-48ff78925b79
 	github.com/beorn7/perks v0.0.0-20160229213445-3ac7bf7a47d1 // indirect
+	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/golang/glog v0.0.0-20141105023935-44145f04b68c // indirect
+	github.com/golang/protobuf v1.3.1 // indirect
 	github.com/golang/snappy v0.0.0-20160529050041-d9eb7a3d35ec // indirect
 	github.com/google/uuid v0.0.0-20171113160352-8c31c18f31ed // indirect
 	github.com/inconshreveable/mousetrap v1.0.0 // indirect
@@ -21,7 +23,6 @@ require (
 	github.com/spf13/pflag v1.0.1
 	github.com/stretchr/testify v1.3.0
 	github.com/syndtr/goleveldb v0.0.0-20180815032940-ae2bd5eed72d
-	golang.org/x/sync v0.0.0-20181221193216-37e7f081c4d4 // indirect
 	gopkg.in/check.v1 v1.0.0-20180628173108-788fd7840127 // indirect
 	gopkg.in/mgo.v2 v2.0.0-20180705113604-9856a29383ce // indirect
 	gopkg.in/robfig/cron.v2 v2.0.0-20150107220207-be2e0b0deed5

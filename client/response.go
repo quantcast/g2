@@ -58,7 +58,7 @@ func (resp *Response) Update() (data []byte, err error) {
 func (resp *Response) Status() (status *Status, err error) {
 	data := bytes.SplitN(resp.Data, []byte{'\x00'}, 2)
 	if len(data) != 2 {
-		err = fmt.Errorf("Invalid data: %v", resp.Data)
+		err = fmt.Errorf("Invalid data: %v, split resulted in fewer than 2 elements", resp.Data)
 		return
 	}
 	status = &Status{}

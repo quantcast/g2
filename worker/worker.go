@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	rt "github.com/quantcast/g2/pkg/runtime"
@@ -15,6 +16,17 @@ const (
 	Unlimited = iota
 	OneByOne
 )
+
+type LogLevel int
+
+const (
+	Error   LogLevel = 0
+	Warning LogLevel = 1
+	Info    LogLevel = 2
+	Debug   LogLevel = 3
+)
+
+type LogHandler func(level LogLevel, message ...string)
 
 // Worker is the only structure needed by worker side developing.
 // It can connect to multi-server and grab jobs.
@@ -28,15 +40,24 @@ type Worker struct {
 	// The shuttingDown variable is protected by the Worker lock
 	shuttingDown bool
 	// Used during shutdown to wait for all active jobs to finish
-	activeJobs sync.WaitGroup
-
-	// once protects registering jobs multiple times
-	once sync.Once
+	activeJobs      sync.WaitGroup
+	activeJobsCount int32
 
 	Id           string
 	ErrorHandler ErrorHandler
 	JobHandler   JobHandler
 	limit        chan bool
+	logHandler   LogHandler
+}
+
+func (worker *Worker) Log(level LogLevel, message ...string) {
+	if worker.logHandler != nil {
+		worker.logHandler(level, message...)
+	}
+}
+
+func (worker *Worker) GetActiveJobCount() int32 {
+	return atomic.LoadInt32(&worker.activeJobsCount)
 }
 
 // Return a worker.
@@ -48,14 +69,19 @@ type Worker struct {
 // OneByOne(=1), there will be only one job executed in a time.
 func New(limit int) (worker *Worker) {
 	worker = &Worker{
-		agents: make([]*agent, 0, limit),
-		funcs:  make(jobFuncs),
-		in:     make(chan *inPack, rt.QueueSize),
+		agents:     make([]*agent, 0, limit),
+		funcs:      make(jobFuncs),
+		in:         make(chan *inPack, rt.QueueSize),
+		logHandler: nil,
 	}
 	if limit != Unlimited {
 		worker.limit = make(chan bool, limit-1)
 	}
 	return
+}
+
+func (worker *Worker) SetLogHandler(logHandler LogHandler) {
+	worker.logHandler = logHandler
 }
 
 // inner error handling
@@ -81,7 +107,7 @@ func (worker *Worker) AddServer(net, addr string) (err error) {
 // Broadcast an outpack to all Gearman server.
 func (worker *Worker) broadcast(outpack *outPack) {
 	for _, v := range worker.agents {
-		v.write(outpack)
+		v.Write(outpack)
 	}
 }
 
@@ -149,22 +175,23 @@ func (worker *Worker) removeFunc(funcname string) {
 func (worker *Worker) handleInPack(inpack *inPack) {
 	switch inpack.dataType {
 	case rt.PT_NoJob:
-		inpack.a.PreSleep()
+		_ = inpack.a.PreSleep()
 	case rt.PT_Noop:
 		if !worker.isShuttingDown() {
-			inpack.a.Grab()
+			_ = inpack.a.Grab()
 		}
 	case rt.PT_JobAssign, rt.PT_JobAssignUniq:
 		go func() {
 			if err := worker.exec(inpack); err != nil {
-				worker.err(err)
+				worker.Log(Error, fmt.Sprintf("ERROR %v in handleInPack(server: %v, job %v), discarding the results because cannot send them back to gearman", err, inpack.a.addr, inpack.handle))
+				inpack.a.Connect()
 			}
 		}()
 		if worker.limit != nil {
 			worker.limit <- true
 		}
 		if !worker.isShuttingDown() {
-			inpack.a.Grab()
+			_ = inpack.a.Grab()
 		}
 	case rt.PT_Error:
 		worker.err(inpack.Err())
@@ -186,17 +213,9 @@ func (worker *Worker) Ready() (err error) {
 		return ErrNoneFuncs
 	}
 	for _, a := range worker.agents {
-		if err = a.Connect(); err != nil {
-			return
-		}
+		go a.Connect()
 	}
 
-	// `once` protects registering worker functions multiple times.
-	worker.once.Do(func() {
-		for funcname, f := range worker.funcs {
-			worker.addFunc(funcname, f.timeout)
-		}
-	})
 	worker.ready = true
 	return
 }
@@ -213,9 +232,7 @@ func (worker *Worker) Work() {
 	}
 
 	worker.running = true
-	for _, a := range worker.agents {
-		a.Grab()
-	}
+
 	var inpack *inPack
 	for inpack = range worker.in {
 		worker.handleInPack(inpack)
@@ -244,14 +261,12 @@ func (worker *Worker) Close() {
 	}
 }
 
-func (worker *Worker) Reconnect() error {
+func (worker *Worker) ReconnectAllAgents() error {
 	worker.Lock()
 	defer worker.Unlock()
 	if worker.running == true {
 		for _, a := range worker.agents {
-			if err := a.reconnect(); err != nil {
-				return err
-			}
+			a.Connect()
 		}
 	}
 	return nil
@@ -287,9 +302,8 @@ func (worker *Worker) SetId(id string) {
 func (worker *Worker) exec(inpack *inPack) (err error) {
 	defer func() {
 		// decrement job counter in completion of this job
-		worker.Lock()
 		worker.activeJobs.Done()
-		worker.Unlock()
+		atomic.AddInt32(&worker.activeJobsCount, -1)
 		if worker.limit != nil {
 			<-worker.limit
 		}
@@ -302,6 +316,7 @@ func (worker *Worker) exec(inpack *inPack) (err error) {
 		}
 	}()
 	worker.activeJobs.Add(1)
+	atomic.AddInt32(&worker.activeJobsCount, 1)
 	if worker.isShuttingDown() {
 		return
 	}
@@ -329,21 +344,26 @@ func (worker *Worker) exec(inpack *inPack) (err error) {
 				outpack.dataType = rt.PT_WorkException
 			}
 			err = r.err
+			if err != nil {
+				return
+			}
 		}
 		outpack.handle = inpack.handle
 		outpack.data = r.data
-		inpack.a.Write(outpack)
+		err = inpack.a.Write(outpack)
 	}
 	return
 }
-func (worker *Worker) reRegisterFuncsForAgent(a *agent) {
+func (worker *Worker) reRegisterFuncsForAgent(a *agent) (err error) {
 	worker.Lock()
 	defer worker.Unlock()
 	for funcname, f := range worker.funcs {
 		outpack := prepFuncOutpack(funcname, f.timeout)
-		a.write(outpack)
+		if err := a.Write(outpack); err != nil {
+			return err
+		}
 	}
-
+	return
 }
 
 func (worker *Worker) Shutdown() {
@@ -397,7 +417,8 @@ func (e *WorkerDisconnectError) Error() string {
 
 // Responds to the error by asking the worker to reconnect
 func (e *WorkerDisconnectError) Reconnect() (err error) {
-	return e.agent.reconnect()
+	e.agent.Connect()
+	return nil
 }
 
 // Which server was this for?
