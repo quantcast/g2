@@ -295,6 +295,10 @@ func (client *Client) reconnect(err error) error {
 		client.Log(Warning, fmt.Sprintf("Non-fatal error %v, while closing connection to %v", closeErr, client.addr))
 	}
 
+	oldChans := client.loadChans()
+	close(oldChans.expected)
+	close(oldChans.outbound)
+
 	conn, err := client.connOpenHandler()
 	if err != nil {
 		client.err(err)
@@ -309,15 +313,10 @@ func (client *Client) reconnect(err error) error {
 		return errors.New("Was expecting nil when replacing with new connection")
 	}
 
-	newChans := &channels{
-		expected: make(chan *Response),
-		outbound: make(chan *request)}
-
-	oldChans := (*channels)(atomic.SwapPointer(
+	// replace closed channels with new ones
+	_ = (*channels)(atomic.SwapPointer(
 		(*unsafe.Pointer)(unsafe.Pointer(&client.chans)),
-		unsafe.Pointer(newChans)))
-	close(oldChans.expected)
-	close(oldChans.outbound)
+		unsafe.Pointer(&channels{expected: make(chan *Response), outbound: make(chan *request)})))
 
 	go client.readLoop()
 	go client.writeLoop()
