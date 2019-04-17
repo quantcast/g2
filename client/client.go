@@ -34,6 +34,11 @@ type connection struct {
 	connVersion int
 }
 
+type channels struct {
+	outbound chan *request
+	expected chan *Response
+}
+
 type ConnCloseHandler func(conn net.Conn) (err error)
 type ConnOpenHandler func() (conn net.Conn, err error)
 
@@ -45,9 +50,7 @@ type Client struct {
 	handlers       sync.Map
 	conn           *connection
 	//rw        *bufio.ReadWriter
-	outbound chan *request
-	expected chan *Response
-
+	chans        *channels
 	responsePool *sync.Pool
 	requestPool  *sync.Pool
 
@@ -158,11 +161,12 @@ func NewClient(connCloseHandler ConnCloseHandler,
 	addr := conn.RemoteAddr()
 
 	client = &Client{
-		net:              addr.Network(),
-		addr:             addr.String(),
-		conn:             &connection{Conn: conn},
-		expected:         make(chan *Response),
-		outbound:         make(chan *request),
+		net:  addr.Network(),
+		addr: addr.String(),
+		conn: &connection{Conn: conn},
+		chans: &channels{
+			expected: make(chan *Response),
+			outbound: make(chan *request)},
 		ResponseTimeout:  DefaultTimeout,
 		responsePool:     &sync.Pool{New: func() interface{} { return &Response{} }},
 		requestPool:      &sync.Pool{New: func() interface{} { return &request{} }},
@@ -192,6 +196,10 @@ func (client *Client) writeReconnectCleanup(conn *connection, req *request, ibuf
 	return false
 }
 
+func (client *Client) loadChans() *channels {
+	return (*channels)(atomic.LoadPointer((*unsafe.Pointer)(unsafe.Pointer(&client.chans))))
+}
+
 func (client *Client) writeLoop() {
 	ibuf := make([]byte, 4)
 	length := uint32(0)
@@ -200,7 +208,7 @@ func (client *Client) writeLoop() {
 	// Pipeline requests; but only write them one at a time. To allow multiple
 	// goroutines to all write as quickly as possible, uses a channel and the
 	// writeLoop lives in a separate goroutine.
-	for req := range client.outbound {
+	for req := range client.loadChans().outbound {
 
 		conn := client.loadConn()
 		if conn == nil {
@@ -287,9 +295,6 @@ func (client *Client) reconnect(err error) error {
 		client.Log(Warning, fmt.Sprintf("Non-fatal error %v, while closing connection to %v", closeErr, client.addr))
 	}
 
-	close(client.expected)
-	close(client.outbound)
-
 	conn, err := client.connOpenHandler()
 	if err != nil {
 		client.err(err)
@@ -304,8 +309,15 @@ func (client *Client) reconnect(err error) error {
 		return errors.New("Was expecting nil when replacing with new connection")
 	}
 
-	client.expected = make(chan *Response)
-	client.outbound = make(chan *request)
+	newChans := &channels{
+		expected: make(chan *Response),
+		outbound: make(chan *request)}
+
+	oldChans := (*channels)(atomic.SwapPointer(
+		(*unsafe.Pointer)(unsafe.Pointer(&client.chans)),
+		unsafe.Pointer(newChans)))
+	close(oldChans.expected)
+	close(oldChans.outbound)
 
 	go client.readLoop()
 	go client.writeLoop()
@@ -400,10 +412,10 @@ func (client *Client) process(resp *Response) {
 
 		client.err(getError(resp.Data))
 
-		client.expected <- resp
+		client.loadChans().expected <- resp
 
 	case rt.PT_StatusRes, rt.PT_JobCreated, rt.PT_EchoRes:
-		client.expected <- resp
+		client.loadChans().expected <- resp
 	case rt.PT_WorkComplete, rt.PT_WorkFail, rt.PT_WorkException:
 		defer client.handlers.Delete(resp.Handle)
 		fallthrough
@@ -444,9 +456,10 @@ func (client *Client) submit(pt rt.PT, funcname string, payload []byte) (handle 
 		}
 	}()
 
-	client.outbound <- client.request().submitJob(pt, funcname, IdGen.Id(), payload)
+	chans := client.loadChans()
+	chans.outbound <- client.request().submitJob(pt, funcname, IdGen.Id(), payload)
 
-	if res := <-client.expected; res != nil {
+	if res := <-chans.expected; res != nil {
 		var err error
 		if res.DataType == rt.PT_Error {
 			err = getError(res.Data)
@@ -553,9 +566,10 @@ func (client *Client) Status(handle string) (status *Status, err error) {
 		}
 	}()
 
-	client.outbound <- client.request().status(handle)
+	chans := client.loadChans()
+	chans.outbound <- client.request().status(handle)
 
-	res := <-client.expected
+	res := <-chans.expected
 
 	if res == nil {
 		return nil, errors.New("Status response queue is empty, please resend")
@@ -576,9 +590,10 @@ func (client *Client) Echo(data []byte) (echo []byte, err error) {
 		}
 	}()
 
-	client.outbound <- client.request().echo(data)
+	chans := client.loadChans()
+	chans.outbound <- client.request().echo(data)
 
-	res := <-client.expected
+	res := <-chans.expected
 
 	if res == nil {
 		return nil, errors.New("Echo request got empty response, please resend")
