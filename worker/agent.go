@@ -46,7 +46,7 @@ func (a *agent) work() {
 	a.worker.Log(Info, "Starting agent Work For:", a.addr)
 	defer func() {
 		if err := safeCastError(recover(), "panic in work()"); err != nil {
-			a.reconnect_error(err)
+			a.reconnectError(err)
 		}
 	}()
 
@@ -66,13 +66,13 @@ func (a *agent) work() {
 					continue
 				} else {
 					a.worker.Log(Info, "got permanent network error with server:", a.addr, "comm thread exiting.")
-					a.reconnect_error(err)
+					a.reconnectError(err)
 					// else - we're probably dc'ing due to a Close()
 					break
 				}
 			} else {
 				a.worker.Log(Info, "got error", err.Error(), "with server:", a.addr, "comm thread exiting...")
-				a.reconnect_error(err)
+				a.reconnectError(err)
 				break
 			}
 		}
@@ -85,7 +85,7 @@ func (a *agent) work() {
 		}
 		for {
 			if inpack, l, err = decodeInPack(data); err != nil {
-				a.reconnect_error(err)
+				a.reconnectError(err)
 				break
 			} else {
 				leftdata = nil
@@ -103,7 +103,7 @@ func (a *agent) work() {
 	}
 }
 
-func (a *agent) reconnect_error(err error) {
+func (a *agent) reconnectError(err error) {
 	if a.conn != nil {
 		err = &WorkerDisconnectError{
 			err:   err,
@@ -173,7 +173,7 @@ func (a *agent) Connect() {
 	var err error
 
 	for !a.worker.isShuttingDown() {
-		for num_tries := 1; !a.worker.isShuttingDown(); num_tries++ {
+		for numTries := 1; !a.worker.isShuttingDown(); numTries++ {
 
 			if a.conn != nil {
 				_ = a.conn.Close()
@@ -183,8 +183,8 @@ func (a *agent) Connect() {
 			// nil-out the rw pointer since it's no longer valid
 			_ = atomic.SwapPointer((*unsafe.Pointer)(unsafe.Pointer(&a.rw)), nil)
 
-			if num_tries%100 == 0 {
-				a.worker.Log(Info, fmt.Sprintf("Still trying to connect to server %v, attempt# %v ...", a.addr, num_tries))
+			if numTries%100 == 0 {
+				a.worker.Log(Info, fmt.Sprintf("Still trying to connect to server %v, attempt# %v ...", a.addr, numTries))
 			}
 			conn, err = net.Dial(a.net, a.addr)
 			if err != nil {

@@ -283,8 +283,8 @@ func (client *Client) reconnect(err error) error {
 	connVersion := client.loadConn().connVersion
 
 	client.Log(Error, fmt.Sprintf("Closing connection to %v due to error %v, will reconnect...", client.addr, err))
-	if close_err := client.Close(); close_err != nil {
-		client.Log(Warning, fmt.Sprintf("Non-fatal error %v, while closing connection to %v", close_err, client.addr))
+	if closeErr := client.Close(); closeErr != nil {
+		client.Log(Warning, fmt.Sprintf("Non-fatal error %v, while closing connection to %v", closeErr, client.addr))
 	}
 
 	close(client.expected)
