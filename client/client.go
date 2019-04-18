@@ -50,9 +50,11 @@ type Client struct {
 	handlers       sync.Map
 	conn           *connection
 	//rw        *bufio.ReadWriter
-	chans        *channels
-	responsePool *sync.Pool
-	requestPool  *sync.Pool
+	chans          *channels
+	responsePool   *sync.Pool
+	requestPool    *sync.Pool
+	delayProcessMs uint8
+	delaySubmitMs  uint8
 
 	ResponseTimeout time.Duration
 
@@ -426,6 +428,10 @@ func (client *Client) process(resp *Response) {
 	case rt.PT_WorkData, rt.PT_WorkWarning, rt.PT_WorkStatus:
 		// These alternate conditions should not happen so long as
 		// everyone is following the specification.
+		if client.delayProcessMs > 0 {
+			time.Sleep(time.Duration(client.delayProcessMs) * time.Millisecond)
+		}
+		time.Sleep(2 * time.Millisecond)
 		if handler, ok := client.handlers.Load(resp.Handle); ok {
 			if h, ok := handler.(ResponseHandler); ok {
 				h(resp)
@@ -468,7 +474,11 @@ func (client *Client) submit(pt rt.PT, funcname string, payload []byte) (handle 
 		if res.DataType == rt.PT_Error {
 			err = getError(res.Data)
 		}
-		defer client.responsePool.Put(res)
+		//uncomment delay below to cause TestSnapshot to fail
+		if client.delaySubmitMs > 0 {
+			time.Sleep(time.Duration(client.delaySubmitMs) * time.Millisecond)
+		}
+		client.responsePool.Put(res)
 		return res.Handle, err
 	}
 

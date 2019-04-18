@@ -13,6 +13,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 type snapshot struct {
@@ -201,6 +202,14 @@ func TestClose(test *testing.T) {
 }
 
 func TestSnapshot(test *testing.T) {
+	snapshotTest(test, 0, 5)
+}
+
+func TestSnapshotDelayed(test *testing.T) {
+	snapshotTest(test, 5, 5)
+}
+
+func snapshotTest(test *testing.T, delaySubmitMs uint8, delayProcessMs uint8) {
 	client, server := net.Pipe()
 
 	snapshot, err := loadSnapshot("perl")
@@ -212,6 +221,10 @@ func TestSnapshot(test *testing.T) {
 	// This has to be done in another go-routine since all of the reads/writes
 	// are synchronous
 	gearmanClient := NewConnected(client)
+	gearmanClient.delaySubmitMs = delaySubmitMs
+	gearmanClient.ErrorHandler = func(err error) {
+		test.Fatalf("Client error: %s", err.Error())
+	}
 
 	if err = snapshot.replay(server, "server", "client"); err != nil {
 		test.Fatalf("error loading snapshot: %s", err)
@@ -223,6 +236,12 @@ func TestSnapshot(test *testing.T) {
 
 	errors := make(chan error)
 
+	ch := make(chan bool, 1)
+	defer close(ch)
+
+	timer := time.NewTimer(1 * time.Second)
+	defer timer.Stop()
+
 	go func() {
 		if _, err := gearmanClient.Do("test", payload, rt.JobNormal, func(r *Response) {
 			if !reflect.DeepEqual(payload, r.Data) {
@@ -230,12 +249,23 @@ func TestSnapshot(test *testing.T) {
 					hex.Dump(payload), hex.Dump(r.Data))
 			}
 			close(errors)
+			ch <- true
 		}); err != nil {
 			errors <- fmt.Errorf("\nError:%v", err.Error())
 		}
 	}()
 
-	for err := range errors {
-		test.Fatalf("error: %s", err)
+	go func() {
+		for err := range errors {
+			test.Fatalf("error: %s", err)
+		}
+	}()
+
+	select {
+	case <-ch:
+		fmt.Println("Test Finished")
+	case <-timer.C:
+		test.Fatalf("Timeout")
 	}
+
 }
