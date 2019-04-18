@@ -223,14 +223,17 @@ func TestSnapshot(test *testing.T) {
 
 	errors := make(chan error)
 
-	go gearmanClient.Do("test", payload, rt.JobNormal, func(r *Response) {
-		if !reflect.DeepEqual(payload, r.Data) {
-			errors <- fmt.Errorf("\nexpected:\n%s\nobserved:\n%s\n",
-				hex.Dump(payload), hex.Dump(r.Data))
+	go func() {
+		if _, err := gearmanClient.Do("test", payload, rt.JobNormal, func(r *Response) {
+			if !reflect.DeepEqual(payload, r.Data) {
+				errors <- fmt.Errorf("\nexpected:\n%s\nobserved:\n%s\n",
+					hex.Dump(payload), hex.Dump(r.Data))
+			}
+			close(errors)
+		}); err != nil {
+			errors <- fmt.Errorf("\nError:%v", err.Error())
 		}
-
-		close(errors)
-	})
+	}()
 
 	for err := range errors {
 		test.Fatalf("error: %s", err)
