@@ -27,9 +27,7 @@ func main() {
 	// by implementing IdGenerator interface.
 	// client.IdGen = client.NewAutoIncId()
 
-	logs.InitLogs()
-	logs.FlushLogs()
-	c, err := client.NewNetClient(rt.Network, "127.0.0.1:4730")
+	c, err := client.New(rt.Network, "127.0.0.1:4730", logHandler)
 	if err != nil {
 		log.Fatalln(err)
 	}

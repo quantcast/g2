@@ -204,11 +204,12 @@ func (client *Client) writeLoop() {
 	ibuf := make([]byte, 4)
 	length := uint32(0)
 	var i int
+	chans := client.loadChans()
 
 	// Pipeline requests; but only write them one at a time. To allow multiple
 	// goroutines to all write as quickly as possible, uses a channel and the
 	// writeLoop lives in a separate goroutine.
-	for req := range client.loadChans().outbound {
+	for req := range chans.outbound {
 
 		conn := client.loadConn()
 		if conn == nil {
@@ -348,8 +349,12 @@ func (client *Client) readLoop() {
 	var err error
 	var resp *Response
 	startConn := client.loadConn()
+	newConn := startConn
+	if startConn == nil {
+		return
+	}
 
-	for startConn == client.loadConn() {
+	for ; newConn == startConn; newConn = client.loadConn() {
 
 		if _, exit := client.readReconnect(startConn, header); exit {
 			return
