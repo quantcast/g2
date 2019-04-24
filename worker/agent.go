@@ -24,16 +24,18 @@ type agent struct {
 	rw                *bufio.ReadWriter
 	worker            *Worker
 	in                chan []byte
+	readBuffPool      *sync.Pool
 	net, addr         string
 }
 
 // Create the agent of job server.
 func newAgent(net, addr string, worker *Worker) (a *agent, err error) {
 	a = &agent{
-		net:    net,
-		addr:   addr,
-		worker: worker,
-		in:     make(chan []byte, rt.QueueSize),
+		net:          net,
+		addr:         addr,
+		worker:       worker,
+		in:           make(chan []byte, rt.QueueSize),
+		readBuffPool: &sync.Pool{New: func() interface{} { return rt.NewBuffer(rt.BufferSize) }},
 	}
 	return
 }
@@ -252,7 +254,9 @@ func (a *agent) Connect() {
 func (a *agent) read(myRw *bufio.ReadWriter) (data []byte, err error) {
 	n := 0
 
-	tmp := rt.NewBuffer(rt.BufferSize)
+	tmp := a.readBuffPool.Get().([]byte)
+	defer a.readBuffPool.Put(tmp)
+
 	var buf bytes.Buffer
 
 	// read the header so we can get the length of the data
