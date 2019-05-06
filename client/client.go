@@ -426,6 +426,10 @@ func (client *Client) process(resp *Response) {
 	case rt.PT_WorkData, rt.PT_WorkWarning, rt.PT_WorkStatus:
 		// These alternate conditions should not happen so long as
 		// everyone is following the specification.
+		// TODO: replace this delay with a way of re-queueing the work message if there the jobId is not in the client.handlers
+		// the sleep below is here to allow for the Do() function to have enough time to store jobId->handler
+		// in client.handlers before the work completion arrives.
+		time.Sleep(3 * time.Millisecond)
 		if handler, ok := client.handlers.Load(resp.Handle); ok {
 			if h, ok := handler.(ResponseHandler); ok {
 				h(resp)
