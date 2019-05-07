@@ -24,6 +24,10 @@ var (
 	NullBytes                    = []byte{Null}
 )
 
+const (
+	WORK_HANDLE_DELAY_MS = 5 // milliseconds delay for re-try processing of work completion requests if handler hasn't been yet stored in hash map.
+)
+
 type connection struct {
 	// This simple wrapper struct is just a convenient way to deal with the
 	// fact that accessing the underlying pointer for an interface value type
@@ -430,7 +434,7 @@ func (client *Client) process(resp *Response) {
 		var ok bool
 		if handler, ok = client.handlers.Load(resp.Handle); !ok {
 			// possibly the response arrived faster than the job handler was added to client.handlers, we'll wait a bit and give it another try
-			time.Sleep(5 * time.Millisecond)
+			time.Sleep(WORK_HANDLE_DELAY_MS * time.Millisecond)
 			if handler, ok = client.handlers.Load(resp.Handle); !ok {
 				client.err(errors.New(fmt.Sprintf("unexpected %s response for \"%s\" with no handler", resp.DataType, resp.Handle)))
 			}
