@@ -332,18 +332,13 @@ func (client *Client) reconnect(err error) error {
 
 func (client *Client) drainInProgress() {
 	defer func() {
-		if e := safeCastError(recover(), "panic in submit()"); e != nil {
-			client.Log(Debug, fmt.Sprintf("drainInProgress recover: %s", e))
-		}
+		recover()
 	}()
 
-	var count int32
 	for req := range client.chans.inProgress {
 		req.close()
 		client.requestPool.Put(req) // recycle here since it didn't get to be processed
-		count++
 	}
-	client.Log(Debug, fmt.Sprintf("drain inProgress removed %d entries", count))
 
 }
 
