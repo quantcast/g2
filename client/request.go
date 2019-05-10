@@ -6,17 +6,25 @@ import (
 
 // Request from client
 type request struct {
-	pt   rt.PT
-	data [][]byte
+	pt       rt.PT
+	expected chan *Response
+	data     [][]byte
+}
+
+func (req *request) close() {
+	if req.expected != nil {
+		close(req.expected)
+	}
 }
 
 func (req *request) args(args ...[]byte) {
 	req.data = req.data[:0]
 	req.data = append(req.data, args...)
+	req.expected = make(chan *Response, 1)
 }
 
-func (req *request) submitJob(pt rt.PT, funcname, id string, arg []byte) *request {
-	req.pt = pt
+func (req *request) submitJob(reqType rt.PT, funcname, id string, arg []byte) *request {
+	req.pt = reqType
 
 	req.args([]byte(funcname), []byte(id), arg)
 
