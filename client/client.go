@@ -497,10 +497,8 @@ func (client *Client) submit(reqType rt.PT, funcname string, payload []byte) (ha
 
 	chans := client.loadChans()
 	req := client.request().submitJob(reqType, funcname, IdGen.Id(), payload)
-	client.Log(Debug, "writing to chans.outbound...")
 	chans.outbound <- req
 
-	client.Log(Debug, "reading from req.expected...")
 	if res := <-req.expected; res != nil {
 		var err error
 		if res.DataType == rt.PT_Error {
