@@ -65,6 +65,7 @@ type Client struct {
 	connCloseHandler ConnCloseHandler
 	connOpenHandler  ConnOpenHandler
 	logHandler       LogHandler
+	submitLock       sync.Mutex
 }
 
 type LogLevel int
@@ -485,6 +486,9 @@ func (client *Client) request() *request {
 }
 
 func (client *Client) submit(reqType rt.PT, funcname string, payload []byte) (handle string, err error) {
+
+	client.submitLock.Lock()
+	defer client.submitLock.Unlock()
 
 	defer func() {
 		if e := safeCastError(recover(), "panic in submit()"); e != nil {
