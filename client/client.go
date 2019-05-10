@@ -25,8 +25,8 @@ var (
 )
 
 const (
-	WORK_HANDLE_DELAY_MS   = 5 // milliseconds delay for re-try processing of work completion requests if handler hasn't been yet stored in hash map.
-	IN_PROGRESS_QUEUE_SIZE = 100
+	WorkHandleDelay     = 5 // milliseconds delay for re-try processing of work completion requests if handler hasn't been yet stored in hash map.
+	InProgressQueueSize = 8
 )
 
 type connection struct {
@@ -169,7 +169,7 @@ func NewClient(connCloseHandler ConnCloseHandler,
 		net:              addr.Network(),
 		addr:             addr.String(),
 		conn:             &connection{Conn: conn},
-		chans:            &channels{outbound: make(chan *request), inProgress: make(chan *request, IN_PROGRESS_QUEUE_SIZE)},
+		chans:            &channels{outbound: make(chan *request), inProgress: make(chan *request, InProgressQueueSize)},
 		ResponseTimeout:  DefaultTimeout,
 		responsePool:     &sync.Pool{New: func() interface{} { return &Response{} }},
 		requestPool:      &sync.Pool{New: func() interface{} { return &request{} }},
@@ -322,7 +322,7 @@ func (client *Client) reconnect(err error) error {
 	// replace closed channels with new ones
 	_ = (*channels)(atomic.SwapPointer(
 		(*unsafe.Pointer)(unsafe.Pointer(&client.chans)),
-		unsafe.Pointer(&channels{outbound: make(chan *request), inProgress: make(chan *request, IN_PROGRESS_QUEUE_SIZE)})))
+		unsafe.Pointer(&channels{outbound: make(chan *request), inProgress: make(chan *request, InProgressQueueSize)})))
 
 	go client.readLoop()
 	go client.writeLoop()
@@ -449,7 +449,7 @@ func (client *Client) process(resp *Response) {
 		var ok bool
 		if handler, ok = client.handlers.Load(resp.Handle); !ok {
 			// possibly the response arrived faster than the job handler was added to client.handlers, we'll wait a bit and give it another try
-			time.Sleep(WORK_HANDLE_DELAY_MS * time.Millisecond)
+			time.Sleep(WorkHandleDelay * time.Millisecond)
 			if handler, ok = client.handlers.Load(resp.Handle); !ok {
 				client.err(errors.New(fmt.Sprintf("unexpected %s response for \"%s\" with no handler", resp.DataType, resp.Handle)))
 			}
