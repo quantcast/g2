@@ -493,7 +493,7 @@ func (client *Client) submit(reqType rt.PT, funcname string, payload []byte) (ha
 	}()
 
 	chans := client.loadChans()
-	req := client.request().submit(reqType, funcname, IdGen.Id(), payload)
+	req := client.request().submitJob(reqType, funcname, IdGen.Id(), payload)
 	chans.outbound <- req
 
 	if res := <-req.expected; res != nil {
