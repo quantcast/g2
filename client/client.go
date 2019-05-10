@@ -25,7 +25,8 @@ var (
 )
 
 const (
-	WORK_HANDLE_DELAY_MS = 5 // milliseconds delay for re-try processing of work completion requests if handler hasn't been yet stored in hash map.
+	WORK_HANDLE_DELAY_MS   = 5 // milliseconds delay for re-try processing of work completion requests if handler hasn't been yet stored in hash map.
+	IN_PROGRESS_QUEUE_SIZE = 100
 )
 
 type connection struct {
@@ -39,8 +40,8 @@ type connection struct {
 }
 
 type channels struct {
-	outbound chan *request
-	expected chan *Response
+	inProgress chan *request
+	outbound   chan *request
 }
 
 type ConnCloseHandler func(conn net.Conn) (err error)
@@ -165,12 +166,10 @@ func NewClient(connCloseHandler ConnCloseHandler,
 	addr := conn.RemoteAddr()
 
 	client = &Client{
-		net:  addr.Network(),
-		addr: addr.String(),
-		conn: &connection{Conn: conn},
-		chans: &channels{
-			expected: make(chan *Response),
-			outbound: make(chan *request)},
+		net:              addr.Network(),
+		addr:             addr.String(),
+		conn:             &connection{Conn: conn},
+		chans:            &channels{outbound: make(chan *request), inProgress: make(chan *request, IN_PROGRESS_QUEUE_SIZE)},
 		ResponseTimeout:  DefaultTimeout,
 		responsePool:     &sync.Pool{New: func() interface{} { return &Response{} }},
 		requestPool:      &sync.Pool{New: func() interface{} { return &request{} }},
@@ -192,7 +191,7 @@ func (client *Client) IsConnectionSet() bool {
 func (client *Client) writeReconnectCleanup(conn *connection, req *request, ibufs ...[]byte) bool {
 	for _, ibuf := range ibufs {
 		if _, err := conn.Write(ibuf); err != nil {
-			client.requestPool.Put(req)
+			//client.requestPool.Put(req)
 			go client.reconnect(err)
 			return true // return true will cause writeLoop to exit, it will be restarted upon successful reconnect
 		}
@@ -217,6 +216,7 @@ func (client *Client) writeLoop() {
 
 		conn := client.loadConn()
 		if conn == nil {
+			req.close()
 			client.requestPool.Put(req)
 			return
 		}
@@ -252,7 +252,7 @@ func (client *Client) writeLoop() {
 			}
 		}
 
-		client.requestPool.Put(req)
+		chans.inProgress <- req
 	}
 }
 
@@ -301,7 +301,8 @@ func (client *Client) reconnect(err error) error {
 	}
 
 	oldChans := client.loadChans()
-	close(oldChans.expected)
+	close(oldChans.inProgress)
+	client.drainInProgress()
 	close(oldChans.outbound)
 
 	conn, err := client.connOpenHandler()
@@ -321,12 +322,29 @@ func (client *Client) reconnect(err error) error {
 	// replace closed channels with new ones
 	_ = (*channels)(atomic.SwapPointer(
 		(*unsafe.Pointer)(unsafe.Pointer(&client.chans)),
-		unsafe.Pointer(&channels{expected: make(chan *Response), outbound: make(chan *request)})))
+		unsafe.Pointer(&channels{outbound: make(chan *request), inProgress: make(chan *request, IN_PROGRESS_QUEUE_SIZE)})))
 
 	go client.readLoop()
 	go client.writeLoop()
 
 	return nil
+}
+
+func (client *Client) drainInProgress() {
+	defer func() {
+		if e := safeCastError(recover(), "panic in submit()"); e != nil {
+			client.Log(Debug, fmt.Sprintf("drainInProgress recover: %s", e))
+		}
+	}()
+
+	var count int32
+	for req := range client.chans.inProgress {
+		req.close()
+		client.requestPool.Put(req) // recycle here since it didn't get to be processed
+		count++
+	}
+	client.Log(Debug, fmt.Sprintf("drain inProgress removed %d entries", count))
+
 }
 
 func (client *Client) loadConn() *connection {
@@ -406,24 +424,27 @@ func (client *Client) readLoop() {
 			resp.Data = contents
 		}
 
-		client.process(resp)
+		req := <-client.loadChans().inProgress
+
+		client.process(req, resp)
+
+		// recycle the request object, it's 2nd life has ended
+		req.close()
+		client.requestPool.Put(req)
 	}
 
 }
 
-func (client *Client) process(resp *Response) {
+func (client *Client) process(req *request, resp *Response) {
 	// NOTE Any waiting goroutine which reads from `channels` should return the
 	// response object to the pool; but the conditions which handle it
 	// terminally should return it here.
 	switch resp.DataType {
 	case rt.PT_Error:
-
 		client.err(getError(resp.Data))
-
-		client.loadChans().expected <- resp
-
+		req.expected <- resp
 	case rt.PT_StatusRes, rt.PT_JobCreated, rt.PT_EchoRes:
-		client.loadChans().expected <- resp
+		req.expected <- resp
 	case rt.PT_WorkComplete, rt.PT_WorkFail, rt.PT_WorkException:
 		defer client.handlers.Delete(resp.Handle)
 		fallthrough
@@ -463,7 +484,7 @@ func (client *Client) request() *request {
 	return client.requestPool.Get().(*request)
 }
 
-func (client *Client) submit(pt rt.PT, funcname string, payload []byte) (handle string, err error) {
+func (client *Client) submit(reqType rt.PT, funcname string, payload []byte) (handle string, err error) {
 
 	defer func() {
 		if e := safeCastError(recover(), "panic in submit()"); e != nil {
@@ -472,9 +493,10 @@ func (client *Client) submit(pt rt.PT, funcname string, payload []byte) (handle 
 	}()
 
 	chans := client.loadChans()
-	chans.outbound <- client.request().submitJob(pt, funcname, IdGen.Id(), payload)
+	req := client.request().submit(reqType, funcname, IdGen.Id(), payload)
+	chans.outbound <- req
 
-	if res := <-chans.expected; res != nil {
+	if res := <-req.expected; res != nil {
 		var err error
 		if res.DataType == rt.PT_Error {
 			err = getError(res.Data)
@@ -582,9 +604,10 @@ func (client *Client) Status(handle string) (status *Status, err error) {
 	}()
 
 	chans := client.loadChans()
-	chans.outbound <- client.request().status(handle)
+	req := client.request().status(handle)
+	chans.outbound <- req
 
-	res := <-chans.expected
+	res := <-req.expected
 
 	if res == nil {
 		return nil, errors.New("Status response queue is empty, please resend")
@@ -592,7 +615,6 @@ func (client *Client) Status(handle string) (status *Status, err error) {
 	status, err = res.Status()
 
 	client.responsePool.Put(res)
-
 	return
 }
 
@@ -606,16 +628,16 @@ func (client *Client) Echo(data []byte) (echo []byte, err error) {
 	}()
 
 	chans := client.loadChans()
-	chans.outbound <- client.request().echo(data)
+	req := client.request().echo(data)
+	chans.outbound <- req
 
-	res := <-chans.expected
+	res := <-req.expected
 
 	if res == nil {
 		return nil, errors.New("Echo request got empty response, please resend")
 	}
 
 	echo = res.Data
-
 	client.responsePool.Put(res)
 
 	return
