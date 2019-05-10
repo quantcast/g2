@@ -425,27 +425,26 @@ func (client *Client) readLoop() {
 			resp.Data = contents
 		}
 
-		req := <-client.loadChans().inProgress
+		client.process(resp)
 
-		client.process(req, resp)
-
-		// recycle the request object, it's 2nd life has ended
-		//req.close()
-		client.requestPool.Put(req)
 	}
 
 }
 
-func (client *Client) process(req *request, resp *Response) {
+func (client *Client) process(resp *Response) {
 	// NOTE Any waiting goroutine which reads from `channels` should return the
 	// response object to the pool; but the conditions which handle it
 	// terminally should return it here.
 	switch resp.DataType {
 	case rt.PT_Error:
 		client.err(getError(resp.Data))
-		req.expected <- resp
+		fallthrough
 	case rt.PT_StatusRes, rt.PT_JobCreated, rt.PT_EchoRes:
+		req := <-client.loadChans().inProgress
+		// recycle the request object, it's 2nd life has ended
 		req.expected <- resp
+		req.close()
+		client.requestPool.Put(req)
 	case rt.PT_WorkComplete, rt.PT_WorkFail, rt.PT_WorkException:
 		defer client.handlers.Delete(resp.Handle)
 		fallthrough
