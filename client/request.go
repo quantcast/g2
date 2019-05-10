@@ -23,7 +23,7 @@ func (req *request) args(args ...[]byte) {
 	req.expected = make(chan *Response, 1)
 }
 
-func (req *request) submit(reqType rt.PT, funcname, id string, arg []byte) *request {
+func (req *request) submitJob(reqType rt.PT, funcname, id string, arg []byte) *request {
 	req.pt = reqType
 
 	req.args([]byte(funcname), []byte(id), arg)

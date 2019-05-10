@@ -191,7 +191,7 @@ func (client *Client) IsConnectionSet() bool {
 func (client *Client) writeReconnectCleanup(conn *connection, req *request, ibufs ...[]byte) bool {
 	for _, ibuf := range ibufs {
 		if _, err := conn.Write(ibuf); err != nil {
-			//client.requestPool.Put(req)
+			client.requestPool.Put(req)
 			go client.reconnect(err)
 			return true // return true will cause writeLoop to exit, it will be restarted upon successful reconnect
 		}
