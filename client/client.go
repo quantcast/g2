@@ -440,7 +440,7 @@ func (client *Client) process(resp *Response) {
 		fallthrough
 	case rt.PT_StatusRes, rt.PT_JobCreated, rt.PT_EchoRes:
 		req := <-client.loadChans().inProgress
-		// recycle the request object, it's 2nd life has ended
+		// channel response to the appropriate waiter
 		req.expected <- resp
 	case rt.PT_WorkComplete, rt.PT_WorkFail, rt.PT_WorkException:
 		defer client.handlers.Delete(resp.Handle)
@@ -607,6 +607,11 @@ func (client *Client) Status(handle string) (status *Status, err error) {
 
 	chans := client.loadChans()
 	req := client.request().status(handle)
+	defer func() {
+		req.close()
+		client.requestPool.Put(req)
+	}()
+
 	chans.outbound <- req
 
 	res := <-req.expected
@@ -631,6 +636,11 @@ func (client *Client) Echo(data []byte) (echo []byte, err error) {
 
 	chans := client.loadChans()
 	req := client.request().echo(data)
+	defer func() {
+		req.close()
+		client.requestPool.Put(req)
+	}()
+
 	chans.outbound <- req
 
 	res := <-req.expected
