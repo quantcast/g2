@@ -442,7 +442,7 @@ func (client *Client) process(resp *Response) {
 		req := <-client.loadChans().inProgress
 		// recycle the request object, it's 2nd life has ended
 		req.expected <- resp
-		req.close()
+		//req.close()
 		client.requestPool.Put(req)
 	case rt.PT_WorkComplete, rt.PT_WorkFail, rt.PT_WorkException:
 		defer client.handlers.Delete(resp.Handle)
