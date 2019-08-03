@@ -442,8 +442,6 @@ func (client *Client) process(resp *Response) {
 		req := <-client.loadChans().inProgress
 		// recycle the request object, it's 2nd life has ended
 		req.expected <- resp
-		//req.close()
-		client.requestPool.Put(req)
 	case rt.PT_WorkComplete, rt.PT_WorkFail, rt.PT_WorkException:
 		defer client.handlers.Delete(resp.Handle)
 		fallthrough
@@ -493,6 +491,11 @@ func (client *Client) submit(reqType rt.PT, funcname string, payload []byte) (ha
 
 	chans := client.loadChans()
 	req := client.request().submitJob(reqType, funcname, IdGen.Id(), payload)
+	defer func() {
+		req.close()
+		client.requestPool.Put(req)
+	}()
+
 	chans.outbound <- req
 
 	if res := <-req.expected; res != nil {
