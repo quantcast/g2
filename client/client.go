@@ -339,7 +339,6 @@ func (client *Client) drainInProgress() {
 		req.close()
 		client.requestPool.Put(req) // recycle here since it didn't get to be processed
 	}
-
 }
 
 func (client *Client) loadConn() *connection {
@@ -435,10 +434,8 @@ func (client *Client) process(resp *Response) {
 		fallthrough
 	case rt.PT_StatusRes, rt.PT_JobCreated, rt.PT_EchoRes:
 		req := <-client.loadChans().inProgress
-		// recycle the request object, it's 2nd life has ended
+		// channel response to the appropriate waiter
 		req.expected <- resp
-		req.close()
-		client.requestPool.Put(req)
 	case rt.PT_WorkComplete, rt.PT_WorkFail, rt.PT_WorkException:
 		defer client.handlers.Delete(resp.Handle)
 		fallthrough
@@ -488,6 +485,11 @@ func (client *Client) submit(reqType rt.PT, funcname string, payload []byte) (ha
 
 	chans := client.loadChans()
 	req := client.request().submitJob(reqType, funcname, IdGen.Id(), payload)
+	defer func() {
+		req.close()
+		client.requestPool.Put(req)
+	}()
+
 	chans.outbound <- req
 
 	if res := <-req.expected; res != nil {
@@ -599,6 +601,11 @@ func (client *Client) Status(handle string) (status *Status, err error) {
 
 	chans := client.loadChans()
 	req := client.request().status(handle)
+	defer func() {
+		req.close()
+		client.requestPool.Put(req)
+	}()
+
 	chans.outbound <- req
 
 	res := <-req.expected
@@ -623,6 +630,11 @@ func (client *Client) Echo(data []byte) (echo []byte, err error) {
 
 	chans := client.loadChans()
 	req := client.request().echo(data)
+	defer func() {
+		req.close()
+		client.requestPool.Put(req)
+	}()
+
 	chans.outbound <- req
 
 	res := <-req.expected
