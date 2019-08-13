@@ -53,6 +53,7 @@ type Client struct {
 	reconnectState uint32
 	net, addr      string
 	handlers       sync.Map
+	handlerConds   sync.Map
 	conn           *connection
 	//rw        *bufio.ReadWriter
 	chans        *channels
@@ -438,6 +439,7 @@ func (client *Client) process(resp *Response) {
 		req.expected <- resp
 	case rt.PT_WorkComplete, rt.PT_WorkFail, rt.PT_WorkException:
 		defer client.handlers.Delete(resp.Handle)
+		defer client.handlerConds.Delete(resp.Handle)
 		fallthrough
 	case rt.PT_WorkData, rt.PT_WorkWarning, rt.PT_WorkStatus:
 		// These alternate conditions should not happen so long as
@@ -445,8 +447,10 @@ func (client *Client) process(resp *Response) {
 		var handler interface{}
 		var ok bool
 		if handler, ok = client.handlers.Load(resp.Handle); !ok {
-			// possibly the response arrived faster than the job handler was added to client.handlers, we'll wait a bit and give it another try
-			time.Sleep(WorkHandleDelay * time.Millisecond)
+			cond := client.getOrSetCond(resp.Handle)
+			cond.L.Lock()
+			cond.Wait()
+			cond.L.Unlock()
 			if handler, ok = client.handlers.Load(resp.Handle); !ok {
 				client.err(errors.New(fmt.Sprintf("unexpected %s response for \"%s\" with no handler", resp.DataType, resp.Handle)))
 			}
@@ -523,7 +527,22 @@ func (client *Client) Do(funcname string, payload []byte,
 
 	client.handlers.Store(handle, h)
 
+	cond := client.getOrSetCond(handle)
+	cond.L.Lock()
+	cond.Broadcast()
+	cond.L.Unlock()
+
 	return
+}
+
+//returns a *sync.Cond that is stored at handle
+func (client *Client) getOrSetCond(handle string) *sync.Cond {
+	cond := sync.NewCond(&sync.Mutex{})
+	current, loaded := client.handlerConds.LoadOrStore(handle, cond)
+	if loaded {
+		cond, _ = current.(*sync.Cond)
+	}
+	return cond
 }
 
 // Call the function in background, no response needed.
