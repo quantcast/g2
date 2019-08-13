@@ -25,7 +25,7 @@ var (
 )
 
 const (
-	WorkHandleDelay     = 5 // milliseconds delay for re-try processing of work completion requests if handler hasn't been yet stored in hash map.
+	WorkHandleDelay     = 500 // milliseconds delay for re-try processing of work completion requests if handler hasn't been yet stored in hash map.
 	InProgressQueueSize = 8
 )
 
