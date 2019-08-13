@@ -53,7 +53,7 @@ type ConnOpenHandler func() (conn net.Conn, err error)
 type Client struct {
 	reconnectState uint32
 	net, addr      string
-	handlers       sync.Map
+	handlers       *HandlerMap
 	conn           *connection
 	//rw        *bufio.ReadWriter
 	chans        *channels
@@ -170,6 +170,7 @@ func NewClient(connCloseHandler ConnCloseHandler,
 		net:              addr.Network(),
 		addr:             addr.String(),
 		conn:             &connection{Conn: conn},
+		handlers:         NewHandlerMap(),
 		chans:            &channels{outbound: make(chan *request), inProgress: make(chan *request, InProgressQueueSize)},
 		ResponseTimeout:  DefaultTimeout,
 		responsePool:     &sync.Pool{New: func() interface{} { return &Response{} }},
@@ -445,24 +446,15 @@ func (client *Client) process(resp *Response) {
 		// everyone is following the specification.
 		var handler interface{}
 		var ok = false
-		for tr := WorkHandleDelayTries; tr > 0 && !ok; tr-- {
-			if handler, ok = client.handlers.Load(resp.Handle); !ok {
-				// last iteration will be with tr == 1
-				if tr > 1 {
-					time.Sleep(WorkHandleDelay * time.Millisecond)
-				} else {
-					client.err(errors.New(fmt.Sprintf("unexpected %s response for \"%s\" with no handler", resp.DataType, resp.Handle)))
-				}
-			}
-		}
-		if ok {
+		if handler, ok = client.handlers.Get(resp.Handle, WorkHandleDelay*WorkHandleDelayTries); !ok {
+			client.err(errors.New(fmt.Sprintf("unexpected %s response for \"%s\" with no handler", resp.DataType, resp.Handle)))
+		} else {
 			if h, ok := handler.(ResponseHandler); ok {
 				h(resp)
 			} else {
 				client.err(errors.New(fmt.Sprintf("Could not cast handler to ResponseHandler for %v", resp.Handle)))
 			}
 		}
-
 		client.responsePool.Put(resp)
 	}
 }
@@ -525,7 +517,7 @@ func (client *Client) Do(funcname string, payload []byte,
 
 	handle, err = client.submit(pt, funcname, payload)
 
-	client.handlers.Store(handle, h)
+	client.handlers.Put(handle, h)
 
 	return
 }
