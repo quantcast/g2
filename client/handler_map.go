@@ -9,9 +9,9 @@ import (
 )
 
 type HandlerMap struct {
-	mu       sync.Mutex
-	innerMap map[string]ResponseHandler
-	waiters  list.List
+	mu         sync.Mutex
+	innerMap   map[string]ResponseHandler
+	waitersMap map[string]list.List
 }
 
 type waiter struct {
@@ -21,7 +21,7 @@ type waiter struct {
 func NewHandlerMap() *HandlerMap {
 	return &HandlerMap{sync.Mutex{},
 		make(map[string]ResponseHandler, 100),
-		list.List{},
+		make(map[string]list.List, 100),
 	}
 }
 
@@ -30,14 +30,16 @@ func (m *HandlerMap) Put(key string, value ResponseHandler) {
 	defer m.mu.Unlock()
 	m.innerMap[key] = value
 	// signal to any waiters here
-	for {
-		next := m.waiters.Front()
-		if next == nil {
-			break // No more waiters blocked.
+	if waiters, ok := m.waitersMap[key]; ok {
+		for {
+			next := waiters.Front()
+			if next == nil {
+				break // No more waiters blocked.
+			}
+			w := next.Value.(waiter)
+			close(w.ready)
 		}
-		w := next.Value.(waiter)
-		m.waiters.Remove(next)
-		close(w.ready)
+		delete(m.waitersMap, key)
 	}
 }
 
@@ -67,9 +69,14 @@ func (m *HandlerMap) Get(key string, timeoutMs int) (value ResponseHandler, ok b
 			nsLeft := maxTime.Sub(time.Now()).Nanoseconds()
 			ctx, _ := context.WithTimeout(context.Background(), time.Duration(nsLeft)*time.Nanosecond)
 
+			waiters, wok := m.waitersMap[key]
+			if !wok {
+				waiters = list.List{}
+				m.waitersMap[key] = waiters
+			}
 			ready := make(chan struct{})
 			w := waiter{ready: ready}
-			elem := m.waiters.PushBack(w)
+			elem := waiters.PushBack(w)
 			m.mu.Unlock() // unlock before we start waiting on stuff
 
 			select {
@@ -81,7 +88,7 @@ func (m *HandlerMap) Get(key string, timeoutMs int) (value ResponseHandler, ok b
 					continue
 				default:
 					// we got timeout, let's remove
-					m.waiters.Remove(elem)
+					waiters.Remove(elem)
 				}
 				m.mu.Unlock()
 				return
