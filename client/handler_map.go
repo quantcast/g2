@@ -37,6 +37,7 @@ func (m *HandlerMap) Put(key string, value ResponseHandler) {
 				break // No more waiters blocked.
 			}
 			w := next.Value.(waiter)
+			waiters.Remove(next)
 			close(w.ready)
 		}
 		delete(m.waitersMap, key)
