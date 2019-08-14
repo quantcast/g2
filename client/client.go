@@ -25,9 +25,8 @@ var (
 )
 
 const (
-	WorkHandleDelay      = 1 // milliseconds delay for re-try processing of work completion requests if handler hasn't been yet stored in hash map.
-	WorkHandleDelayTries = 500
-	InProgressQueueSize  = 8
+	WorkHandleTimeoutMs = 500 // milliseconds delay for re-try processing of work completion requests if handler hasn't been yet stored in hash map.
+	InProgressQueueSize = 8
 )
 
 type connection struct {
@@ -446,7 +445,7 @@ func (client *Client) process(resp *Response) {
 		// everyone is following the specification.
 		var handler interface{}
 		var ok = false
-		if handler, ok = client.handlers.Get(resp.Handle, WorkHandleDelay*WorkHandleDelayTries); !ok {
+		if handler, ok = client.handlers.Get(resp.Handle, WorkHandleTimeoutMs); !ok {
 			client.err(errors.New(fmt.Sprintf("unexpected %s response for \"%s\" with no handler", resp.DataType, resp.Handle)))
 		} else {
 			if h, ok := handler.(ResponseHandler); ok {

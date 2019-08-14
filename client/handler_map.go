@@ -11,7 +11,7 @@ import (
 type HandlerMap struct {
 	mu         sync.Mutex
 	innerMap   map[string]ResponseHandler
-	waitersMap map[string]list.List
+	waitersMap map[string]*list.List
 }
 
 type waiter struct {
@@ -21,7 +21,7 @@ type waiter struct {
 func NewHandlerMap() *HandlerMap {
 	return &HandlerMap{sync.Mutex{},
 		make(map[string]ResponseHandler, 100),
-		make(map[string]list.List, 100),
+		make(map[string]*list.List, 100),
 	}
 }
 
@@ -71,7 +71,7 @@ func (m *HandlerMap) Get(key string, timeoutMs int) (value ResponseHandler, ok b
 
 			waiters, wok := m.waitersMap[key]
 			if !wok {
-				waiters = list.List{}
+				waiters = &list.List{}
 				m.waitersMap[key] = waiters
 			}
 			ready := make(chan struct{})
