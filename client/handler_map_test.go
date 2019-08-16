@@ -23,7 +23,7 @@ func TestHandlerMapEarlyStoreRetrieve(t *testing.T) {
 		t.Logf("test: got a response \n")
 	}
 	handler_map.Put(testKey, handler)
-	myHandler, ok := handler_map.Get(testKey, 20)
+	myHandler, ok := handler_map.Get(testKey, timeoutMs)
 	if !ok {
 		t.Error("Failed to get test key")
 	}
@@ -37,7 +37,7 @@ func TestHandlerMapDelayedPutRetrieve(t *testing.T) {
 	startTime := time.Now()
 
 	go func() {
-		time.Sleep(10 * time.Millisecond)
+		time.Sleep(timeoutMs / 2 * time.Millisecond)
 
 		// at this point the Get would be waiting for the response.
 		counts, waiters := handler_map.GetCounts()
@@ -51,8 +51,7 @@ func TestHandlerMapDelayedPutRetrieve(t *testing.T) {
 	}()
 
 	t.Logf("test: started waiting for key at %d ms after start\n", getMsSince(startTime))
-	t.Logf("test: started waiting for key at %d ms after start\n", getMsSince(startTime))
-	myHandler, ok := handler_map.Get(testKey, 20)
+	myHandler, ok := handler_map.Get(testKey, timeoutMs)
 	if !ok {
 		t.Error("Failed to get test key")
 	}
