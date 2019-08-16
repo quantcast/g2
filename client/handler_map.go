@@ -25,6 +25,12 @@ func NewHandlerMap() *HandlerMap {
 	}
 }
 
+func (m *HandlerMap) GetCounts() (counts int, waiters int) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return len(m.innerMap), len(m.waitersMap)
+}
+
 func (m *HandlerMap) Put(key string, value ResponseHandler) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
