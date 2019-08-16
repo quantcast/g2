@@ -8,8 +8,8 @@ import (
 )
 
 const (
-	TestKey   = "test_key"
-	TimeoutMs = 100
+	testKey   = "test_key"
+	timeoutMs = 100
 )
 
 func getMsSince(startTime time.Time) int {
@@ -22,8 +22,8 @@ func TestHandlerMapEarlyStoreRetrieve(t *testing.T) {
 	var handler ResponseHandler = func(*Response) {
 		t.Logf("test: got a response \n")
 	}
-	handler_map.Put(TestKey, handler)
-	myHandler, ok := handler_map.Get(TestKey, 20)
+	handler_map.Put(testKey, handler)
+	myHandler, ok := handler_map.Get(testKey, 20)
 	if !ok {
 		t.Error("Failed to get test key")
 	}
@@ -47,12 +47,12 @@ func TestHandlerMapDelayedPutRetrieve(t *testing.T) {
 		var handler ResponseHandler = func(*Response) {
 			t.Logf("test: got a response at time %d ms after start\n", getMsSince(startTime))
 		}
-		handler_map.Put(TestKey, handler)
+		handler_map.Put(testKey, handler)
 	}()
 
 	t.Logf("test: started waiting for key at %d ms after start\n", getMsSince(startTime))
 	t.Logf("test: started waiting for key at %d ms after start\n", getMsSince(startTime))
-	myHandler, ok := handler_map.Get(TestKey, 20)
+	myHandler, ok := handler_map.Get(testKey, 20)
 	if !ok {
 		t.Error("Failed to get test key")
 	}
@@ -66,15 +66,15 @@ func TestHandlerMapTimeoutPutTooLate(t *testing.T) {
 	startTime := time.Now()
 
 	go func() {
-		time.Sleep(2 * TimeoutMs * time.Millisecond)
+		time.Sleep(2 * timeoutMs * time.Millisecond)
 		var handler ResponseHandler = func(*Response) {
 			t.Logf("test: got a response at time %d ms after start\n", getMsSince(startTime))
 		}
-		handler_map.Put(TestKey, handler)
+		handler_map.Put(testKey, handler)
 	}()
 
 	t.Logf("test: started waiting for key at %d ms after start\n", getMsSince(startTime))
-	_, ok := handler_map.Get(TestKey, TimeoutMs)
+	_, ok := handler_map.Get(testKey, timeoutMs)
 	if ok {
 		t.Error("Should have timed out when getting the key")
 		return
@@ -82,11 +82,11 @@ func TestHandlerMapTimeoutPutTooLate(t *testing.T) {
 		actualTimeoutMs := getMsSince(startTime)
 		t.Logf("test: timed out waiting for key at %d ms after start\n", actualTimeoutMs)
 		var comp assert.Comparison = func() (success bool) {
-			return math.Abs(float64(actualTimeoutMs-TimeoutMs))/TimeoutMs < 0.1
+			return math.Abs(float64(actualTimeoutMs-timeoutMs))/timeoutMs < 0.1
 		}
-		assert.Condition(t, comp, "Timeout did not occur within 10%% margin, expected timeout ms: %d", TimeoutMs)
+		assert.Condition(t, comp, "Timeout did not occur within 10%% margin, expected timeout ms: %d", timeoutMs)
 		// wait till producer has added the element
-		time.Sleep(3 * TimeoutMs * time.Millisecond)
+		time.Sleep(3 * timeoutMs * time.Millisecond)
 		counts, waiters := handler_map.GetCounts()
 		assert.Equal(t, 1, counts, "Map elements")
 		assert.Equal(t, 0, waiters, "Waiter groups")
