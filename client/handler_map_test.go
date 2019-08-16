@@ -8,8 +8,9 @@ import (
 )
 
 const (
-	testKey   = "test_key"
-	timeoutMs = 100
+	testKey        = "test_key"
+	timeoutMs      = 200
+	marginErrorPct = 10
 )
 
 func getMsSince(startTime time.Time) int {
@@ -35,9 +36,10 @@ func TestHandlerMapDelayedPutRetrieve(t *testing.T) {
 
 	handler_map := NewHandlerMap()
 	startTime := time.Now()
+	expectedResponseMs := timeoutMs / 2
 
 	go func() {
-		time.Sleep(timeoutMs / 2 * time.Millisecond)
+		time.Sleep(time.Duration(expectedResponseMs) * time.Millisecond)
 
 		// at this point the Get would be waiting for the response.
 		counts, waiters := handler_map.GetCounts()
@@ -54,9 +56,16 @@ func TestHandlerMapDelayedPutRetrieve(t *testing.T) {
 	myHandler, ok := handler_map.Get(testKey, timeoutMs)
 	if !ok {
 		t.Error("Failed to get test key")
+	} else {
+		myHandler(nil)
+		actualResponseMs := getMsSince(startTime)
+		var comp assert.Comparison = func() (success bool) {
+			return math.Abs(float64(actualResponseMs-expectedResponseMs))/float64(expectedResponseMs) < float64(marginErrorPct)/100
+		}
+		assert.Condition(t, comp, "Response did not arrive within %d%% margin, expected time %d ms", marginErrorPct, expectedResponseMs)
+
 	}
 
-	myHandler(nil)
 }
 
 func TestHandlerMapTimeoutPutTooLate(t *testing.T) {
@@ -78,9 +87,9 @@ func TestHandlerMapTimeoutPutTooLate(t *testing.T) {
 		actualTimeoutMs := getMsSince(startTime)
 		t.Logf("test: timed out waiting for key at %d ms after start\n", actualTimeoutMs)
 		var comp assert.Comparison = func() (success bool) {
-			return math.Abs(float64(actualTimeoutMs-timeoutMs))/timeoutMs < 0.1
+			return math.Abs(float64(actualTimeoutMs-timeoutMs))/timeoutMs < float64(marginErrorPct)/100
 		}
-		assert.Condition(t, comp, "Timeout did not occur within 10%% margin, expected timeout ms: %d", timeoutMs)
+		assert.Condition(t, comp, "Timeout did not occur within %d%% margin, expected timeout ms: %d", marginErrorPct, timeoutMs)
 		// wait till producer has added the element
 		time.Sleep(3 * timeoutMs * time.Millisecond)
 		counts, waiters := handler_map.GetCounts()
