@@ -96,6 +96,9 @@ func (m *HandlerMap) Get(key string, timeoutMs int) (value ResponseHandler, ok b
 				default:
 					// we got timeout, let's remove
 					waiters.Remove(elem)
+					if waiters.Len() == 0 {
+						delete(m.waitersMap, key)
+					}
 				}
 				m.mu.Unlock()
 				return

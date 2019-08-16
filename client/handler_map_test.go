@@ -1,14 +1,15 @@
 package client
 
 import (
-	"fmt"
 	"github.com/stretchr/testify/assert"
+	"math"
 	"testing"
 	"time"
 )
 
 const (
-	TEST_KEY = "test_key"
+	TestKey   = "test_key"
+	TimeoutMs = 100
 )
 
 func getMsSince(startTime time.Time) int {
@@ -19,10 +20,10 @@ func TestHandlerMapEarlyStoreRetrieve(t *testing.T) {
 
 	handler_map := NewHandlerMap()
 	var handler ResponseHandler = func(*Response) {
-		fmt.Printf("test: I got a response \n")
+		t.Logf("test: got a response \n")
 	}
-	handler_map.Put(TEST_KEY, handler)
-	myHandler, ok := handler_map.Get(TEST_KEY, 20)
+	handler_map.Put(TestKey, handler)
+	myHandler, ok := handler_map.Get(TestKey, 20)
 	if !ok {
 		t.Error("Failed to get test key")
 	}
@@ -44,13 +45,14 @@ func TestHandlerMapDelayedPutRetrieve(t *testing.T) {
 		assert.Equal(t, 1, waiters, "Waiter groups")
 
 		var handler ResponseHandler = func(*Response) {
-			fmt.Printf("test: I got a response at time %d ms after start\n", getMsSince(startTime))
+			t.Logf("test: got a response at time %d ms after start\n", getMsSince(startTime))
 		}
-		handler_map.Put(TEST_KEY, handler)
+		handler_map.Put(TestKey, handler)
 	}()
 
-	fmt.Printf("test: Started waiting for key at %d ms after start\n", getMsSince(startTime))
-	myHandler, ok := handler_map.Get(TEST_KEY, 20)
+	t.Logf("test: started waiting for key at %d ms after start\n", getMsSince(startTime))
+	t.Logf("test: started waiting for key at %d ms after start\n", getMsSince(startTime))
+	myHandler, ok := handler_map.Get(TestKey, 20)
 	if !ok {
 		t.Error("Failed to get test key")
 	}
@@ -64,21 +66,27 @@ func TestHandlerMapTimeoutPutTooLate(t *testing.T) {
 	startTime := time.Now()
 
 	go func() {
-		time.Sleep(30 * time.Millisecond)
+		time.Sleep(2 * TimeoutMs * time.Millisecond)
 		var handler ResponseHandler = func(*Response) {
-			fmt.Printf("test: I got a response at time %d ms after start\n", getMsSince(startTime))
+			t.Logf("test: got a response at time %d ms after start\n", getMsSince(startTime))
 		}
-		handler_map.Put(TEST_KEY, handler)
+		handler_map.Put(TestKey, handler)
 	}()
 
-	fmt.Printf("test: Started waiting for key at %d ms after start\n", getMsSince(startTime))
-	_, ok := handler_map.Get(TEST_KEY, 20)
+	t.Logf("test: started waiting for key at %d ms after start\n", getMsSince(startTime))
+	_, ok := handler_map.Get(TestKey, TimeoutMs)
 	if ok {
 		t.Error("Should have timed out when getting the key")
 		return
 	} else {
+		actualTimeoutMs := getMsSince(startTime)
+		t.Logf("test: timed out waiting for key at %d ms after start\n", actualTimeoutMs)
+		var comp assert.Comparison = func() (success bool) {
+			return math.Abs(float64(actualTimeoutMs-TimeoutMs))/TimeoutMs < 0.1
+		}
+		assert.Condition(t, comp, "Timeout did not occur within 10%% margin, expected timeout ms: %d", TimeoutMs)
 		// wait till producer has added the element
-		time.Sleep(20 * time.Millisecond)
+		time.Sleep(3 * TimeoutMs * time.Millisecond)
 		counts, waiters := handler_map.GetCounts()
 		assert.Equal(t, 1, counts, "Map elements")
 		assert.Equal(t, 0, waiters, "Waiter groups")
