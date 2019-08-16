@@ -25,7 +25,7 @@ var (
 )
 
 const (
-	WorkHandleDelay     = 5 // milliseconds delay for re-try processing of work completion requests if handler hasn't been yet stored in hash map.
+	WorkHandleTimeoutMs = 500 // milliseconds delay for re-try processing of work completion requests if handler hasn't been yet stored in hash map.
 	InProgressQueueSize = 8
 )
 
@@ -52,7 +52,7 @@ type ConnOpenHandler func() (conn net.Conn, err error)
 type Client struct {
 	reconnectState uint32
 	net, addr      string
-	handlers       sync.Map
+	handlers       *HandlerMap
 	conn           *connection
 	//rw        *bufio.ReadWriter
 	chans        *channels
@@ -169,6 +169,7 @@ func NewClient(connCloseHandler ConnCloseHandler,
 		net:              addr.Network(),
 		addr:             addr.String(),
 		conn:             &connection{Conn: conn},
+		handlers:         NewHandlerMap(),
 		chans:            &channels{outbound: make(chan *request), inProgress: make(chan *request, InProgressQueueSize)},
 		ResponseTimeout:  DefaultTimeout,
 		responsePool:     &sync.Pool{New: func() interface{} { return &Response{} }},
@@ -443,22 +444,16 @@ func (client *Client) process(resp *Response) {
 		// These alternate conditions should not happen so long as
 		// everyone is following the specification.
 		var handler interface{}
-		var ok bool
-		if handler, ok = client.handlers.Load(resp.Handle); !ok {
-			// possibly the response arrived faster than the job handler was added to client.handlers, we'll wait a bit and give it another try
-			time.Sleep(WorkHandleDelay * time.Millisecond)
-			if handler, ok = client.handlers.Load(resp.Handle); !ok {
-				client.err(errors.New(fmt.Sprintf("unexpected %s response for \"%s\" with no handler", resp.DataType, resp.Handle)))
-			}
-		}
-		if ok {
+		var ok = false
+		if handler, ok = client.handlers.Get(resp.Handle, WorkHandleTimeoutMs); !ok {
+			client.err(errors.New(fmt.Sprintf("unexpected %s response for \"%s\" with no handler", resp.DataType, resp.Handle)))
+		} else {
 			if h, ok := handler.(ResponseHandler); ok {
 				h(resp)
 			} else {
 				client.err(errors.New(fmt.Sprintf("Could not cast handler to ResponseHandler for %v", resp.Handle)))
 			}
 		}
-
 		client.responsePool.Put(resp)
 	}
 }
@@ -521,7 +516,7 @@ func (client *Client) Do(funcname string, payload []byte,
 
 	handle, err = client.submit(pt, funcname, payload)
 
-	client.handlers.Store(handle, h)
+	client.handlers.Put(handle, h)
 
 	return
 }
