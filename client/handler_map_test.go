@@ -67,10 +67,7 @@ func TestHandlerMapTimeoutPutTooLate(t *testing.T) {
 
 	go func() {
 		time.Sleep(2 * timeoutMs * time.Millisecond)
-		var handler ResponseHandler = func(*Response) {
-			t.Logf("test: got a response at time %d ms after start\n", getMsSince(startTime))
-		}
-		handler_map.Put(testKey, handler)
+		handler_map.Put(testKey, func(*Response) {})
 	}()
 
 	t.Logf("test: started waiting for key at %d ms after start\n", getMsSince(startTime))
