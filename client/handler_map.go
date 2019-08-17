@@ -15,7 +15,7 @@ type HandlerMap struct {
 }
 
 type waiter struct {
-	ready chan<- struct{} // Closed when semaphore acquired.
+	ready chan<- ResponseHandler // Closed when semaphore acquired.
 }
 
 func NewHandlerMap() *HandlerMap {
@@ -44,6 +44,7 @@ func (m *HandlerMap) Put(key string, value ResponseHandler) {
 			}
 			w := next.Value.(waiter)
 			waiters.Remove(next)
+			w.ready <- value
 			close(w.ready)
 		}
 		delete(m.waitersMap, key)
@@ -66,50 +67,35 @@ func (m *HandlerMap) Get(key string, timeoutMs int) (value ResponseHandler, ok b
 		return
 	}
 
-	// let's remember the current time
-	curTime := time.Now()
-	maxTime := curTime.Add(time.Duration(timeoutMs) * time.Millisecond)
+	ctx, _ := context.WithTimeout(context.Background(), time.Duration(timeoutMs)*time.Millisecond)
+	waiters, wok := m.waitersMap[key]
+	if !wok {
+		waiters = &list.List{}
+		m.waitersMap[key] = waiters
+	}
+	ready := make(chan ResponseHandler)
+	w := waiter{ready: ready}
+	elem := waiters.PushBack(w)
+	m.mu.Unlock() // unlock before waiting
 
-	for time.Now().Before(maxTime) && !ok {
-		value, ok = m.innerMap[key]
-		if !ok {
-			nsLeft := maxTime.Sub(time.Now()).Nanoseconds()
-			ctx, _ := context.WithTimeout(context.Background(), time.Duration(nsLeft)*time.Nanosecond)
-
-			waiters, wok := m.waitersMap[key]
-			if !wok {
-				waiters = &list.List{}
-				m.waitersMap[key] = waiters
-			}
-			ready := make(chan struct{})
-			w := waiter{ready: ready}
-			elem := waiters.PushBack(w)
-			m.mu.Unlock() // unlock before we start waiting on stuff
-
-			select {
-			case <-ctx.Done():
-				m.mu.Lock()
-				select {
-				case <-ready:
-					// in case we got signalled during cancellation
-					continue
-				default:
-					// we got timeout, let's remove
-					waiters.Remove(elem)
-					if waiters.Len() == 0 {
-						delete(m.waitersMap, key)
-					}
-				}
-				m.mu.Unlock()
-				return
-
-			case <-ready:
-				m.mu.Lock() // going back to the loop, gotta lock
-				continue
+	select {
+	case <-ctx.Done():
+		m.mu.Lock()
+		// check if the response arrived when it timed out
+		select {
+		case value = <-ready:
+			ok = true
+		default:
+			// got timeout, let's remove waiter
+			waiters.Remove(elem)
+			if waiters.Len() == 0 {
+				delete(m.waitersMap, key)
 			}
 		}
+		m.mu.Unlock()
+	case value = <-ready:
+		ok = true
 	}
 
-	m.mu.Unlock()
 	return
 }
