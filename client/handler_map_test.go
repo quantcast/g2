@@ -108,14 +108,18 @@ func TestMixedMultiPutGet(t *testing.T) {
 	delayedResponseTimeMs := timeoutMs / 2
 	timedoutResponseTimeMs := timeoutMs + marginErrorMs
 
-	go func() {
-		var handler ResponseHandler = func(r *Response) {
+	getHandler := func(key string) ResponseHandler {
+		return func(r *Response) {
+			assert.Equal(t, key, r.Handle, fmt.Sprintf("Handler Key Mismatch, expected: %s, actual: %s", key, r.Handle))
 			t.Logf("test: got a response [%s] at time %d ms after start\n", r.Handle, getMsSince(startTime))
 		}
+	}
+
+	go func() {
 
 		for i := 0; i < numHandlers; i++ {
 			key := fmt.Sprintf("%s-%d", testKey, i)
-			handler_map.Put(key, handler)
+			handler_map.Put(key, getHandler(key))
 		}
 
 		// at this point the Get would be waiting for the response.
@@ -131,7 +135,7 @@ func TestMixedMultiPutGet(t *testing.T) {
 
 		for i := 0; i < numHandlers; i++ {
 			key := fmt.Sprintf("%s-%d-delayed", testKey, i)
-			handler_map.Put(key, handler)
+			handler_map.Put(key, getHandler(key))
 		}
 
 		// at this point the Get would be waiting for the response.
@@ -141,7 +145,7 @@ func TestMixedMultiPutGet(t *testing.T) {
 		time.Sleep(time.Duration(timedoutResponseTimeMs) * time.Millisecond)
 		for i := 0; i < numHandlers; i++ {
 			key := fmt.Sprintf("%s-%d-toolate", testKey, i)
-			handler_map.Put(key, handler)
+			handler_map.Put(key, getHandler(key))
 		}
 
 	}()
