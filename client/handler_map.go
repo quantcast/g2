@@ -1,115 +1,61 @@
 package client
 
 import (
-	"container/list"
-	"golang.org/x/net/context"
-
 	"sync"
 	"time"
 )
 
 type HandlerMap struct {
-	mu         sync.Mutex
-	innerMap   map[string]ResponseHandler
-	waitersMap map[string]*list.List
+	innerMap sync.Map
+	handlerMap   sync.Map
 }
 
-type waiter struct {
-	ready chan<- struct{} // Closed when semaphore acquired.
+type HandHolder struct {
+	once *sync.Once
+	handlerChan chan ResponseHandler
+	handler ResponseHandler
+	innerMap sync.Map
+}
+
+func (handHolder *HandHolder) Get(timoeutMs int) ResponseHandler {
+	handHolder.once.Do(func() {
+		select {
+		case handler := <-handHolder.handlerChan:
+			handHolder.handler = handler
+		case <- time.After( time.Duration( timoeutMs) * time.Millisecond):
+		}})
+	return handHolder.handler
+}
+
+func (handHolder *HandHolder) Put(handler ResponseHandler) {
+	handHolder.handlerChan <- handler
 }
 
 func NewHandlerMap() *HandlerMap {
-	return &HandlerMap{sync.Mutex{},
-		make(map[string]ResponseHandler, 100),
-		make(map[string]*list.List, 100),
-	}
+	return &HandlerMap{}
 }
 
-func (m *HandlerMap) GetCounts() (counts int, waiters int) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return len(m.innerMap), len(m.waitersMap)
+func (m *HandlerMap) OptimisticLoadOrStore(key string) *HandHolder {
+	val, ok := m.handlerMap.Load(key)
+	if !ok {
+		val, _ = m.handlerMap.LoadOrStore(key, &HandHolder{once:new(sync.Once), handlerChan: make(chan ResponseHandler, 1)})
+	}
+	holder, _ := val.(*HandHolder)
+	return holder
 }
 
-func (m *HandlerMap) Put(key string, value ResponseHandler) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.innerMap[key] = value
-	// signal to any waiters here
-	if waiters, ok := m.waitersMap[key]; ok {
-		for {
-			next := waiters.Front()
-			if next == nil {
-				break // No more waiters blocked.
-			}
-			w := next.Value.(waiter)
-			waiters.Remove(next)
-			close(w.ready)
-		}
-		delete(m.waitersMap, key)
-	}
+func (m *HandlerMap) Put(key string, responseHandler ResponseHandler) {
+	holder := m.OptimisticLoadOrStore(key)
+	holder.Put(responseHandler)
+	holder.Get(1)
 }
 
 func (m *HandlerMap) Delete(key string) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	delete(m.innerMap, key)
+	m.handlerMap.Delete(key)
 }
 
 func (m *HandlerMap) Get(key string, timeoutMs int) (value ResponseHandler, ok bool) {
-	m.mu.Lock()
-
-	// optimistic check first
-	value, ok = m.innerMap[key]
-	if ok {
-		m.mu.Unlock()
-		return
-	}
-
-	// let's remember the current time
-	curTime := time.Now()
-	maxTime := curTime.Add(time.Duration(timeoutMs) * time.Millisecond)
-
-	for time.Now().Before(maxTime) && !ok {
-		value, ok = m.innerMap[key]
-		if !ok {
-			nsLeft := maxTime.Sub(time.Now()).Nanoseconds()
-			ctx, _ := context.WithTimeout(context.Background(), time.Duration(nsLeft)*time.Nanosecond)
-
-			waiters, wok := m.waitersMap[key]
-			if !wok {
-				waiters = &list.List{}
-				m.waitersMap[key] = waiters
-			}
-			ready := make(chan struct{})
-			w := waiter{ready: ready}
-			elem := waiters.PushBack(w)
-			m.mu.Unlock() // unlock before we start waiting on stuff
-
-			select {
-			case <-ctx.Done():
-				m.mu.Lock()
-				select {
-				case <-ready:
-					// in case we got signalled during cancellation
-					continue
-				default:
-					// we got timeout, let's remove
-					waiters.Remove(elem)
-					if waiters.Len() == 0 {
-						delete(m.waitersMap, key)
-					}
-				}
-				m.mu.Unlock()
-				return
-
-			case <-ready:
-				m.mu.Lock() // going back to the loop, gotta lock
-				continue
-			}
-		}
-	}
-
-	m.mu.Unlock()
-	return
+	holder := m.OptimisticLoadOrStore(key)
+	handler := holder.Get(timeoutMs)
+	return handler, handler != nil
 }

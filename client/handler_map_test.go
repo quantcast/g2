@@ -41,11 +41,6 @@ func TestHandlerMapDelayedPutRetrieve(t *testing.T) {
 	go func() {
 		time.Sleep(time.Duration(expectedResponseMs) * time.Millisecond)
 
-		// at this point the Get would be waiting for the response.
-		counts, waiters := handler_map.GetCounts()
-		assert.Equal(t, 0, counts, "Map Elements")
-		assert.Equal(t, 1, waiters, "Waiter groups")
-
 		var handler ResponseHandler = func(*Response) {
 			t.Logf("test: got a response at time %d ms after start\n", getMsSince(startTime))
 		}
@@ -92,9 +87,6 @@ func TestHandlerMapTimeoutPutTooLate(t *testing.T) {
 		assert.Condition(t, comp, "Timeout did not occur within %d%% margin, expected timeout ms: %d", marginErrorPct, timeoutMs)
 		// wait till producer has added the element
 		time.Sleep(3 * timeoutMs * time.Millisecond)
-		counts, waiters := handler_map.GetCounts()
-		assert.Equal(t, 1, counts, "Map elements")
-		assert.Equal(t, 0, waiters, "Waiter groups")
 	}
 
 }
